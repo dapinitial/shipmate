@@ -39,15 +39,16 @@ won't let you automate.
 - **Astro SSR**: `run_command: node dist/server/entry.mjs`, `http_port: 8080`.
 - `github: { repo: dapinitial/<name>, branch: main, deploy_on_push: true }`,
   `instance_size_slug: basic-xxs`, `instance_count: 1`.
-- **No secrets in the spec** (it's committed). Keep ALL keys out — set them in the DO dashboard
-  → Settings → Env (public + secret; mark secrets **Encrypted**). Note: `NEXT_PUBLIC_*` are
-  needed at BUILD time, so set them before/at create — adding them later triggers a rebuild.
+- **No secrets in the spec** (it's committed). Put a `# shipmate:envs` marker where env vars go;
+  `bin/do-provision.sh` injects them from `.env.local` at deploy time (below).
 - Add `domains: [{ domain: <sub>.<umbrella>, type: PRIMARY }]` only in DNS Mode A (below).
 
-**Deploy:** show plan (name, region, **~$5/mo**, domain, env vars to add) → on yes:
-`doctl apps create --spec .do/app.yaml` (new) or `doctl apps update <id> --spec .do/app.yaml`.
-Then the user adds env vars in the dashboard (you can't set encrypted secrets from the CLI
-without exposing them). Get the URL: `doctl apps get <id> --format DefaultIngress`.
+**Deploy (env auto-injected, secrets safe):** show plan (name, region, **~$5/mo**, domain) → on
+yes, run `bash "$HOME/.claude/skills/deploy/bin/do-provision.sh" <project-dir>`. It reads
+`.env.local`, splices vars into a **0600 temp spec** (`NEXT_PUBLIC_*`/`PUBLIC_*` plaintext, the
+rest `type: SECRET`), runs `doctl apps create/update`, then shreds the temp — secrets never touch
+git, shell history, logs, or the model. Get the URL: `doctl apps get <id> --format DefaultIngress`.
+*(Fallback with no `.env.local`: add vars in the DO dashboard manually.)*
 
 ---
 
