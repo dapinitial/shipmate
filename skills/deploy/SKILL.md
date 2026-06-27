@@ -18,10 +18,16 @@ won't let you automate.
     commercial use needs Pro at $20/mo). DO scaling is manual; Vercel auto-scales.
 
 ## Safety model (applies to BOTH — this is the product, not a footnote)
-- Deploying **spends money and is outward-facing.** Show the plan + the cost, get an explicit
-  "yes", then act. Never deploy on a guess. A mis-heard command must never bill or publish.
+- **Outward-facing + costs money, so gate on COST CHANGES, not every action:**
+  - **Require an explicit yes** for anything that creates a billed resource or raises cost — a new
+    app (`apps create`), an instance resize, more instances, a new add-on. Show the **monthly cost
+    and the delta** in the plan, and present it as a clear prompt.
+  - **Don't re-gate cost-neutral deploys** — redeploying an existing app, env/spec updates,
+    `deploy_on_push`: same instance, no new charge. Proceed, but **always chime the cost line**
+    (e.g. *"redeploy — still ~$5/mo, no change"*) so the user sees what they're running every time.
+  - A mis-heard or ambiguous command must never create or bill on a guess.
 - **Credentials stay with the user** — in their own CLI config / keychain. Never echo a secret;
-  never write one into a committed file. The pre-commit/secret hygiene of the target repo wins.
+  never write one into a committed file. The target repo's secret hygiene wins.
 
 ---
 
