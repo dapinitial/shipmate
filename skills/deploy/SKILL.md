@@ -91,7 +91,8 @@ git, shell history, logs, or the model. Get the URL: `doctl apps get <id> --form
   `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`, `NEXT_PUBLIC_SITE_URL`,
   `SUPABASE_SECRET_KEY`, `RESEND_API_KEY`.
 - Show plan (project, **Hobby = free non-commercial / Pro $20 commercial**, domain) → on yes:
-  `vercel --prod`. Returns the live `https://<project>.vercel.app`.
+  `bin/vercel-provision.sh <project-dir>` (links, pushes env from `.env.*` via stdin, deploys —
+  **beta**) or plain `vercel --prod`. Returns the live `https://<project>.vercel.app`.
 - **Auto-deploy:** prefer connecting the GitHub repo in the Vercel dashboard (Import Project) so
   every push deploys + PRs get preview URLs — note this to the user as the durable setup.
 
@@ -130,6 +131,10 @@ The fix is *where DNS lives*, not "automate the registrar."
 - `curl -sI https://<domain>` → expect 200/301.
 - Supabase magic-link apps: remind the user to add the prod URL to Supabase → Auth → URL
   Configuration (Site URL + `https://<domain>/**`), or sign-in fails in prod.
+
+## Lifecycle (after it's live)
+- DO: `bin/do-app.sh <status|url|logs|redeploy|destroy> <project-dir>` (destroy needs `--yes`;
+  true point-in-time rollback is dashboard/API only — `redeploy` rebuilds current `main`).
 
 ## After
 - Pushes to `main` auto-redeploy (DO `deploy_on_push` / Vercel git integration).
