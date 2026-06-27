@@ -1,0 +1,9 @@
+# macOS
+.DS_Store
+
+# secrets — never commit (shipmate keeps credentials in the user's CLI config/keychain)
+.env
+.env.*
+!.env.example
+*.pem
+*.key
