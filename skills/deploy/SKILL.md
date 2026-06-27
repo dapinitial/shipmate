@@ -31,19 +31,34 @@ won't let you automate.
 
 ---
 
+## Detect context — per project/repo/user (NEVER hardcode names)
+Derive everything from the current project + environment so the skill works for *anyone*, and
+self-corrects when moved between repos/users/machines:
+- **GitHub owner/repo:** `gh repo view --json nameWithOwner -q .nameWithOwner` (fallback: parse
+  `git -C <dir> remote get-url origin`). Use this `<owner>/<name>` in the spec — **never a literal
+  username**. If an existing `.do/app.yaml`'s `repo:` owner ≠ the current git remote, **fix it
+  (self-heal)** before deploying.
+- **App / project name:** the repo name (or dir basename). **Region:** default `nyc`, configurable.
+- **Supabase ref:** `supabase/.temp/project-ref`, else the `<ref>` in `.env.local`'s SUPABASE_URL.
+- **Tokens:** prefer an **env var** (`SUPABASE_ACCESS_TOKEN`, `DIGITALOCEAN_ACCESS_TOKEN`) → then
+  the CLI's own stored auth / OS keychain → then a clear error. Never assume a keychain name.
+  (`bin/*.sh` already follow this order and auto-derive.)
+
+---
+
 ## Path A — DigitalOcean App Platform
 
 **Preconditions** (check each; stop with the fix if missing):
 1. `command -v doctl` — else: `brew install doctl && doctl auth init` (token from
    cloud.digitalocean.com/account/api/tokens). 2. `doctl account get` authed.
-3. `gh auth status` logged in; repo pushed to `dapinitial/<name>` (DO builds from GitHub).
+3. `gh auth status` logged in; repo pushed to GitHub (DO builds from GitHub) — use the derived `<owner>/<name>`.
 4. Working tree committed + pushed. 5. `npm run build` green.
 
 **Spec** — generate/refresh `.do/app.yaml` (stack-aware):
 - **Next.js**: `environment_slug: node-js`, `build_command: npm run build`,
   `run_command: npx next start -p 8080`, `http_port: 8080`.
 - **Astro SSR**: `run_command: node dist/server/entry.mjs`, `http_port: 8080`.
-- `github: { repo: dapinitial/<name>, branch: main, deploy_on_push: true }`,
+- `github: { repo: <owner>/<name>, branch: main, deploy_on_push: true }`  ← `<owner>` **derived**, never hardcoded,
   `instance_size_slug: basic-xxs`, `instance_count: 1`.
 - **No secrets in the spec** (it's committed). Put a `# shipmate:envs` marker where env vars go;
   `bin/do-provision.sh` injects them from `.env.local` at deploy time (below).
@@ -100,7 +115,7 @@ The fix is *where DNS lives*, not "automate the registrar."
   prod-only keys) go in **`.env.production`**, which `do-provision.sh` layers on top. This matches
   Next.js's own model (dev → `.env.local`, prod build → `.env.production`).
 - **Supabase magic-link apps:** the deployed URL must be allow-listed or sign-in breaks. Run
-  `bin/supabase-allowlist.sh <project-ref> <url> <keychain-service>` — it sets Site URL and
+  `bin/supabase-allowlist.sh <project-dir> <url>` (ref + token auto-derived) — it sets Site URL and
   **non-destructively merges** `<url>/**` into the redirect allow-list via the Supabase Management
   API (token from the keychain, never echoed/argv). This changes **production auth config**, so it
   needs an **explicit confirm** (it'll be gated like any prod change). Manual fallback: Supabase →
