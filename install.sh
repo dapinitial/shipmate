@@ -18,5 +18,15 @@ for skill in "$REPO"/skills/*/; do
   echo "✓ linked $name → $target"
 done
 
+# Make helpers executable (in case the clone dropped the bit).
+chmod +x "$REPO"/skills/deploy/bin/*.sh "$REPO"/.githooks/pre-commit "$REPO"/voice/*.sh "$REPO"/tests/*.sh 2>/dev/null || true
+
+# Enable the secret-scan pre-commit hook for contributors.
+if [ -d "$REPO/.git" ]; then
+  git -C "$REPO" config core.hooksPath .githooks && echo "✓ secret-scan pre-commit hook enabled"
+fi
+
 echo
-echo "Done. In Claude Code, run the skill from any project (e.g. /deploy)."
+echo "Done. Next:"
+echo "  • bash skills/deploy/bin/doctor.sh     # check your tools + auth, per provider"
+echo "  • In Claude Code, run /deploy from any project."

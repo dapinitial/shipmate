@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+# shipmate secret-scan pre-commit hook. Blocks commits that would leak secrets.
+# Enabled by install.sh (git config core.hooksPath .githooks). Bypass: git commit --no-verify
+set -euo pipefail
+fail=0
+
+# 1) Never commit secret-bearing env / token files (only .env.example is allowed).
+while IFS= read -r f; do
+  case "$f" in
+    .env.example) : ;;
+    .env|.env.*|.envrc|*.pem|*.key|*.p12|*.pfx) echo "❌ blocked: '$f' must not be committed (secrets)."; fail=1 ;;
+  esac
+done < <(git diff --cached --name-only)
+
+# 2) Scan staged additions for secret-looking tokens (skip the test fixtures' fake values).
+added="$(git diff --cached --unified=0 -- . ':(exclude)tests/*' | grep '^+' || true)"
+if [ -n "$added" ]; then
+  hits="$(printf '%s\n' "$added" | grep -nE \
+    'sb_secret_[A-Za-z0-9]{16,}|sbp_[A-Za-z0-9]{16,}|re_[A-Za-z0-9]{24,}|sb_publishable_[A-Za-z0-9]{16,}|eyJ[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{10,}|AKIA[0-9A-Z]{16}|ghp_[A-Za-z0-9]{36}|dop_v1_[a-f0-9]{64}' \
+    || true)"
+  if [ -n "$hits" ]; then
+    echo "❌ blocked: a secret-looking token is in your staged changes:"
+    printf '%s\n' "$hits" | sed -E 's/([A-Za-z0-9_]{6})[A-Za-z0-9._-]{8,}/\1…REDACTED/g' | head -8
+    fail=1
+  fi
+fi
+
+[ "$fail" -ne 0 ] && { echo ""; echo "Commit aborted. Move secrets out (env/keychain), or --no-verify if it's a false positive."; exit 1; }
+exit 0

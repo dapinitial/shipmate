@@ -26,26 +26,11 @@ ENVP="$DIR/.env.production"   # optional prod overlay — values here override .
 [ -f "$SPEC_SRC" ] || { echo "✗ no .do/app.yaml in $DIR"; exit 1; }
 grep -q '# shipmate:envs' "$SPEC_SRC" || { echo "✗ .do/app.yaml missing the '# shipmate:envs' marker"; exit 1; }
 
-# --- build the envs: block by merging .env.local + .env.production (overlay wins),
-#     in-memory only; NEXT_PUBLIC_*/PUBLIC_* → GENERAL, everything else → encrypted SECRET ---
-build_envs() {
-  local body
-  body="$( { [ -f "$ENVF" ] && cat "$ENVF"; [ -f "$ENVP" ] && { printf '\n'; cat "$ENVP"; }; } 2>/dev/null \
-    | awk -F= '/^[[:space:]]*#/||/^[[:space:]]*$/{next}{k=$1;gsub(/[[:space:]]/,"",k);last[k]=$0}END{for(k in last)print last[k]}' \
-    | while IFS= read -r line; do
-        key="${line%%=*}"; [ "$key" = "$line" ] && continue
-        val="${line#*=}"
-        val="${val%%[[:space:]]\#*}"                                 # strip inline ' #' comment
-        val="$(printf '%s' "$val" | sed -E "s/^[[:space:]]+//; s/[[:space:]]+\$//; s/^[\"']//; s/[\"']\$//")"
-        [ -z "$val" ] && continue
-        case "$key" in NEXT_PUBLIC_*|PUBLIC_*) t=GENERAL;; *) t=SECRET;; esac
-        esc="$(printf '%s' "$val" | sed "s/'/''/g")"                 # single-quote YAML scalar
-        printf "      - key: %s\n        scope: RUN_AND_BUILD_TIME\n        type: %s\n        value: '%s'\n" "$key" "$t" "$esc"
-      done )"
-  [ -z "$body" ] && return 0
-  printf '    envs:\n%s\n' "$body"
-}
-ENVS_BLOCK="$(build_envs)"
+# --- env vars: classification + overlay merge live in the unit-tested lib ---
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=../lib/envspec.sh
+. "$SCRIPT_DIR/../lib/envspec.sh"
+ENVS_BLOCK="$(emit_envs "$ENVF" "$ENVP")"
 
 # --- splice block in place of the marker into a 0600 temp spec, shredded on exit ---
 TMP="$(mktemp "${TMPDIR:-/tmp}/shipmate.XXXXXX.yaml")"
