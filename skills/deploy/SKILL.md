@@ -90,6 +90,20 @@ The fix is *where DNS lives*, not "automate the registrar."
   DO → `CNAME <sub> → <app>.ondigitalocean.app`; Vercel → the A/CNAME it shows on domain add.
 - **Mode C — no custom domain yet:** ship to the host's default URL and add a domain later.
 
+## Post-deploy — wire the follow-ups automatically (don't leave these manual)
+- **Self-referencing URL (the chicken-egg):** if the app needs its own public URL
+  (`NEXT_PUBLIC_SITE_URL` / `SITE_URL` / `PUBLIC_SITE_URL`), it can't be known until AFTER the first
+  create. So: capture `DefaultIngress`, write it into **`.env.production`** (the gitignored prod
+  overlay), and run a **cost-neutral `update`** to bake it in. Never ask the user to paste their
+  own URL — resolve it.
+- **Local vs prod divergence:** shared values live in `.env.local`; prod-only values (the live URL,
+  prod-only keys) go in **`.env.production`**, which `do-provision.sh` layers on top. This matches
+  Next.js's own model (dev → `.env.local`, prod build → `.env.production`).
+- **Supabase magic-link apps:** the deployed URL must be allow-listed or sign-in breaks. Add the
+  live `<url>` as **Site URL** and `<url>/**` as a **redirect** in Supabase → Auth → URL
+  Configuration. This is a Supabase action (not DO) — state it clearly with the exact values.
+  *(Automatable next via the Supabase Management API + the project's keychain token — planned.)*
+
 ## Verify
 - Confirm the deployment is live (DO: poll `doctl apps get <id>`; Vercel: the CLI returns the URL).
 - `curl -sI https://<domain>` → expect 200/301.
