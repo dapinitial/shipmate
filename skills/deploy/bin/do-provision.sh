@@ -16,6 +16,7 @@
 # Usage: do-provision.sh <project-dir> [create|update|auto]
 set -euo pipefail
 umask 077
+case "${1:-}" in -h|--help) sed -n '2,14p' "$0"; exit 0;; esac
 
 DIR="${1:?project dir required}"
 ACTION="${2:-auto}"

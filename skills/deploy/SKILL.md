@@ -38,7 +38,11 @@ self-corrects when moved between repos/users/machines:
   `git -C <dir> remote get-url origin`). Use this `<owner>/<name>` in the spec — **never a literal
   username**. If an existing `.do/app.yaml`'s `repo:` owner ≠ the current git remote, **fix it
   (self-heal)** before deploying.
-- **App / project name:** the repo name (or dir basename). **Region:** default `nyc`, configurable.
+- **Per-project config:** if the project has a **`.shiprc`** (see `.shiprc.example`), source it and
+  let its `PROVIDER` / `REGION` / `INSTANCE_SIZE` / `APP_NAME` override the skill defaults — user
+  values always win.
+- **App / project name:** `.shiprc` `APP_NAME`, else the repo name (or dir basename). **Region:**
+  `.shiprc` `REGION`, else `nyc`.
 - **Supabase ref:** `supabase/.temp/project-ref`, else the `<ref>` in `.env.local`'s SUPABASE_URL.
 - **Tokens:** prefer an **env var** (`SUPABASE_ACCESS_TOKEN`, `DIGITALOCEAN_ACCESS_TOKEN`) → then
   the CLI's own stored auth / OS keychain → then a clear error. Never assume a keychain name.

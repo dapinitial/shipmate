@@ -1,0 +1,8 @@
+# shipmate per-project defaults — copy to your project root as `.shiprc`.
+# Lets you "work how you wish" without editing the skill. Non-secret values only
+# (real secrets live in .env.local / .env.production / your keychain).
+
+PROVIDER=digitalocean       # digitalocean | vercel
+REGION=nyc                  # DigitalOcean region (nyc, sfo, ams, sgp, …)
+INSTANCE_SIZE=basic-xxs     # DigitalOcean instance size
+# APP_NAME=                  # override the app name (defaults to the repo/dir name)

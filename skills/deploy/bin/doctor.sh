@@ -2,6 +2,7 @@
 # shipmate doctor — check the tools + auth shipmate needs, and say exactly what's missing.
 # Usage: doctor.sh [do|vercel|all]   (default: all)
 set -uo pipefail   # intentionally NOT -e: run every check, then summarize.
+case "${1:-}" in -h|--help) echo "Usage: doctor.sh [do|vercel|all] — check shipmate's tools + auth"; exit 0;; esac
 
 TARGET="${1:-all}"
 ok=0; bad=0
