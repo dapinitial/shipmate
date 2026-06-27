@@ -47,18 +47,22 @@ Requires [`doctl`](https://docs.digitalocean.com/reference/doctl/) (DigitalOcean
 | Provider | Status | Notes |
 |---|---|---|
 | DigitalOcean App Platform | ✅ live | ~$5/mo flat · commercial-OK · you size scaling |
-| Vercel | 🛠 planned | free Hobby (non-commercial) / $20 Pro · best Next.js DX · auto-scales |
+| Vercel | ✅ beta | free Hobby (non-commercial) / $20 Pro · best Next.js DX · auto-scales |
 | Cloudflare / Render / Fly.io | 💭 wishlist | |
+
+`/deploy` detects the target (`.do/app.yaml` → DO, `.vercel/` → Vercel) or asks you inline.
 
 The per-provider details and the full DNS story live in **[docs/PROVIDERS.md](docs/PROVIDERS.md)**.
 
 ## Roadmap
 
-- Provider-agnostic `/deploy` — pick DO or Vercel inline ("choose your destiny").
-- **DNS automation** — host the domain on the provider and subdomains become fully hands-off.
-- **Voice** — an Apple Shortcut and an Alexa Skill front-end ("Hey shipmate, deploy panogram").
-- **MCP** — lean on the Model Context Protocol so providers can ship their *own* agent-callable
-  skills, and shipmate composes them.
+- [x] Provider-agnostic `/deploy` — pick DO or Vercel inline ("choose your destiny").
+- [x] **Voice** v0 — an Apple Shortcut → headless-Claude bridge ("Hey Siri, shipmate, deploy
+      panogram"), safe by default (plan mode). See **[voice/](voice/)**.
+- [ ] **DNS automation** — host the domain on the provider and subdomains become fully hands-off.
+- [ ] **Alexa Skill** front-end (same bridge).
+- [ ] **MCP** — lean on the Model Context Protocol so providers can ship their *own* agent-callable
+      skills, and shipmate composes them.
 
 Full thinking in **[docs/ROADMAP.md](docs/ROADMAP.md)**.
 

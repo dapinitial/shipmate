@@ -1,99 +1,95 @@
 ---
 name: deploy
-description: Deploy the current project to DigitalOcean App Platform (GitHub deploy-on-push) and print the exact SquareSpace DNS record to map its subdomain. Use when the user says "deploy this", "ship it", "set up the environment and deploy", "put this live", or asks to host a project on DO with a custom subdomain. Fleet tool — works from any project directory.
+description: Deploy the current project to DigitalOcean App Platform OR Vercel — you choose the destination — and map a custom subdomain (automatically when DNS is on the host, or by printing the exact record when it's at a registrar like SquareSpace). Use when the user says "deploy this", "ship it", "set up the environment and deploy", "put this live". Fleet tool — works from any project directory.
 ---
 
-# /deploy — DigitalOcean App Platform + SquareSpace DNS
+# /deploy — ship to DigitalOcean or Vercel
 
-Deploys the project in the **current directory** to DO App Platform and hands the user the
-exact CNAME to add at SquareSpace. SquareSpace has **no DNS API**, so that one step stays a
-manual paste until the domain's DNS is migrated to an API provider (DO DNS or Cloudflare) —
-call that out every run; it's the only thing not automated.
+Deploys the project in the **current directory** to whichever host the user picks, sets env,
+and maps the domain. Same safety model and DNS story for both. shipmate's whole point: do the
+host + DNS + registrar dance from one command, and be honest about the one step a provider
+won't let you automate.
 
-## Reality check first (don't skip)
-- **DO App Platform is NOT free** — basic-xxs is ~$5/mo per app. (Vercel Hobby is the free
-  alternative for Next.js; mention it if the user expected free.)
-- This **spends money and is outward-facing**. Treat it like every irreversible action:
-  show the plan, get an explicit "yes", then act. Never deploy on a guess.
+## 0. Pick the destination (ask or detect)
+- Detect: `.do/app.yaml` → DigitalOcean. `vercel.json` / `.vercel/` → Vercel. Else **ask**.
+- Help them choose if unsure (full table: docs/PROVIDERS.md):
+  - **Prototype / demo** → **Vercel** (free Hobby, best Next.js DX, per-PR preview URLs).
+  - **Real product, cost-sensitive** → **DigitalOcean** (~$5/mo flat, commercial-OK; Vercel
+    commercial use needs Pro at $20/mo). DO scaling is manual; Vercel auto-scales.
 
-## Preconditions — check each, stop with the fix if missing
-1. `doctl` installed: `command -v doctl`. If missing → tell the user:
-   `brew install doctl && doctl auth init` (needs a DO API token from
-   cloud.digitalocean.com/account/api/tokens). Stop until done.
-2. `doctl account get` succeeds (authed).
-3. `gh auth status` logged in, and the repo is pushed to GitHub `dapinitial/<name>`
-   (DO deploys from GitHub, not local).
-4. Working tree committed and pushed (DO builds what's on `main`).
-5. `npm run build` is green — run it; abort on failure.
+## Safety model (applies to BOTH — this is the product, not a footnote)
+- Deploying **spends money and is outward-facing.** Show the plan + the cost, get an explicit
+  "yes", then act. Never deploy on a guess. A mis-heard command must never bill or publish.
+- **Credentials stay with the user** — in their own CLI config / keychain. Never echo a secret;
+  never write one into a committed file. The pre-commit/secret hygiene of the target repo wins.
 
-## Gather the target (ask, don't assume)
-- **Subdomain + umbrella domain** (e.g. `panogram.unakin.com`). The umbrella varies per
-  brand — unakin.com, spacelabforever.com, davidpuerto.com, etc. Ask which.
-- **Region** (default `nyc`).
+---
 
-## Build/refresh the `.do/app.yaml` spec (stack-aware)
-Mirror the sibling projects' pattern. Detect the stack from the repo:
+## Path A — DigitalOcean App Platform
+
+**Preconditions** (check each; stop with the fix if missing):
+1. `command -v doctl` — else: `brew install doctl && doctl auth init` (token from
+   cloud.digitalocean.com/account/api/tokens). 2. `doctl account get` authed.
+3. `gh auth status` logged in; repo pushed to `dapinitial/<name>` (DO builds from GitHub).
+4. Working tree committed + pushed. 5. `npm run build` green.
+
+**Spec** — generate/refresh `.do/app.yaml` (stack-aware):
 - **Next.js**: `environment_slug: node-js`, `build_command: npm run build`,
   `run_command: npx next start -p 8080`, `http_port: 8080`.
-- **Astro SSR** (`@astrojs/node`): `run_command: node dist/server/entry.mjs`, `http_port: 8080`.
-- `github: { repo: dapinitial/<name>, branch: main, deploy_on_push: true }`
-- `instance_size_slug: basic-xxs`, `instance_count: 1`
-- **Public env vars inline** (`NEXT_PUBLIC_*` / `PUBLIC_*`, publishable/anon keys are safe).
-  Include `NEXT_PUBLIC_SITE_URL: https://<sub>.<umbrella>`.
-- **Secrets NEVER in the spec** (it's committed). List them as comments to add encrypted in
-  the dashboard: `SUPABASE_SECRET_KEY`, `RESEND_API_KEY`, any `*_PEPPER` (use a FRESH prod
-  value, never the dev one).
-- `domains: [{ domain: <sub>.<umbrella>, type: PRIMARY }]`
+- **Astro SSR**: `run_command: node dist/server/entry.mjs`, `http_port: 8080`.
+- `github: { repo: dapinitial/<name>, branch: main, deploy_on_push: true }`,
+  `instance_size_slug: basic-xxs`, `instance_count: 1`.
+- **No secrets in the spec** (it's committed). Keep ALL keys out — set them in the DO dashboard
+  → Settings → Env (public + secret; mark secrets **Encrypted**). Note: `NEXT_PUBLIC_*` are
+  needed at BUILD time, so set them before/at create — adding them later triggers a rebuild.
+- Add `domains: [{ domain: <sub>.<umbrella>, type: PRIMARY }]` only in DNS Mode A (below).
 
-Commit the spec (human-authored message, no AI attribution — see the repo's CLAUDE.md) and push.
+**Deploy:** show plan (name, region, **~$5/mo**, domain, env vars to add) → on yes:
+`doctl apps create --spec .do/app.yaml` (new) or `doctl apps update <id> --spec .do/app.yaml`.
+Then the user adds env vars in the dashboard (you can't set encrypted secrets from the CLI
+without exposing them). Get the URL: `doctl apps get <id> --format DefaultIngress`.
 
-## Show the plan, get confirmation
-Print: app name, region, instance size + **~$5/mo cost**, domain, and the list of encrypted
-env vars the user must add. Wait for an explicit yes.
+---
 
-## Deploy
-- New app: `doctl apps create --spec .do/app.yaml`
-- Existing (find id: `doctl apps list`): `doctl apps update <id> --spec .do/app.yaml`
-- Then have the user add the **encrypted** secrets in DO → app → Settings → Env, by name.
-  (You cannot set encrypted secrets safely from the CLI without exposing them — keep them out.)
+## Path B — Vercel
 
-## DNS — pick the mode (this is the painpoint; default to Mode A)
+**Preconditions:**
+1. `command -v vercel` — else `npm i -g vercel`. 2. `vercel whoami` authed — else `vercel login`.
+3. `npm run build` green.
 
-**Mode A — DNS hosted on DO (RECOMMENDED, fully automatic).** If the domain's DNS is on
-DigitalOcean, the app spec's `domains:` block makes DO **auto-create the subdomain record AND
-provision the cert** — zero manual steps, no SquareSpace, ever. To get a domain onto DO DNS
-(one-time per umbrella domain):
-  1. `doctl compute domain create <umbrella>` (or for a brand-new domain, just this).
-  2. **⚠ Recreate ALL existing records first** if the domain is already live (MX/email, other
-     subdomains like `sedulous.unakin.com`) — moving nameservers without replicating records
-     breaks email and existing sites. List the current records with the user before migrating.
-  3. At the **registrar (SquareSpace)**, change nameservers to
-     `ns1.digitalocean.com`, `ns2.digitalocean.com`, `ns3.digitalocean.com`. This is the ONLY
-     manual SquareSpace action, done **once per domain, forever.**
-  After propagation, every future subdomain for that domain is automatic via the app spec.
-  - **Cleanest option for a new project:** a fresh dedicated domain straight onto DO DNS — no
-    migration risk, no existing records to replicate.
+**Deploy:**
+- Link the project: `vercel link` (creates `.vercel/`, ties this dir to a Vercel project).
+- **Env vars** — add per environment. Public ones can be piped; for **secrets**, run
+  `vercel env add <NAME> production` and let the user paste the value at the prompt (it never
+  enters shell history). Mirror `.env.local`:
+  `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`, `NEXT_PUBLIC_SITE_URL`,
+  `SUPABASE_SECRET_KEY`, `RESEND_API_KEY`.
+- Show plan (project, **Hobby = free non-commercial / Pro $20 commercial**, domain) → on yes:
+  `vercel --prod`. Returns the live `https://<project>.vercel.app`.
+- **Auto-deploy:** prefer connecting the GitHub repo in the Vercel dashboard (Import Project) so
+  every push deploys + PRs get preview URLs — note this to the user as the durable setup.
 
-**Mode B — DNS still at SquareSpace (fallback, manual once).** SquareSpace has no DNS API, so:
-  - `doctl apps get <id> --format DefaultIngress` → `<app>.ondigitalocean.app`
-  - Tell the user verbatim:
-    > **SquareSpace → Domains → `<umbrella>` → DNS → add a CNAME:**
-    > Host `<sub>` → Value `<app>.ondigitalocean.app`
-  DO provisions the cert once DNS resolves.
+---
 
-**Mode C — no custom domain yet (fastest, free).** Skip DNS entirely: the app is live at
-`<app>.ondigitalocean.app` the moment it deploys. Use this to dogfood end-to-end now and add a
-custom domain later.
+## DNS — same three modes for either host (the painpoint)
+The fix is *where DNS lives*, not "automate the registrar."
+- **Mode A — DNS on the host (DO DNS / Vercel DNS / Cloudflare): fully automatic.** Point the
+  domain's nameservers at the host once; subdomain record + TLS cert are then created from the
+  deploy config. Zero manual steps, forever. (DO: `doctl compute domain create <umbrella>` +
+  set nameservers `ns1/ns2/ns3.digitalocean.com`. Vercel: add domain in project → use Vercel
+  nameservers.) ⚠ Migrating an existing domain means **recreating all its records** (MX, other
+  subdomains) on the new DNS first, or email/sites break — a fresh dedicated domain avoids this.
+- **Mode B — DNS at a registrar with no API (SquareSpace): manual once.** Print the exact record:
+  DO → `CNAME <sub> → <app>.ondigitalocean.app`; Vercel → the A/CNAME it shows on domain add.
+- **Mode C — no custom domain yet:** ship to the host's default URL and add a domain later.
 
 ## Verify
-- Poll `doctl apps get <id>` until the active deployment is `ACTIVE`.
-- Once DNS resolves, `curl -sI https://<sub>.<umbrella>` → expect 200/301.
-- For apps with magic-link auth (Supabase), remind: add the prod URL to Supabase →
-  Authentication → URL Configuration (Site URL + `https://<sub>.<umbrella>/**`).
+- Confirm the deployment is live (DO: poll `doctl apps get <id>`; Vercel: the CLI returns the URL).
+- `curl -sI https://<domain>` → expect 200/301.
+- Supabase magic-link apps: remind the user to add the prod URL to Supabase → Auth → URL
+  Configuration (Site URL + `https://<domain>/**`), or sign-in fails in prod.
 
-## After / the bigger picture
-- Every `git push` to `main` now auto-redeploys (`deploy_on_push`).
-- **The unlock:** migrate the umbrella domain's DNS off SquareSpace to **DO DNS** (or
-  Cloudflare) — one-time nameserver change. Then the manual CNAME step becomes a
-  `doctl compute domain records create` call and this whole flow is genuinely one command.
-  Flag this to the user as the next investment whenever they deploy.
+## After
+- Pushes to `main` auto-redeploy (DO `deploy_on_push` / Vercel git integration).
+- The unlock for the registrar gap: move the umbrella domain's DNS to the host (Mode A). Then
+  every future subdomain is one command. Flag it whenever the user is in Mode B.
