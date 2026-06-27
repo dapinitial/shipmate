@@ -99,10 +99,12 @@ The fix is *where DNS lives*, not "automate the registrar."
 - **Local vs prod divergence:** shared values live in `.env.local`; prod-only values (the live URL,
   prod-only keys) go in **`.env.production`**, which `do-provision.sh` layers on top. This matches
   Next.js's own model (dev → `.env.local`, prod build → `.env.production`).
-- **Supabase magic-link apps:** the deployed URL must be allow-listed or sign-in breaks. Add the
-  live `<url>` as **Site URL** and `<url>/**` as a **redirect** in Supabase → Auth → URL
-  Configuration. This is a Supabase action (not DO) — state it clearly with the exact values.
-  *(Automatable next via the Supabase Management API + the project's keychain token — planned.)*
+- **Supabase magic-link apps:** the deployed URL must be allow-listed or sign-in breaks. Run
+  `bin/supabase-allowlist.sh <project-ref> <url> <keychain-service>` — it sets Site URL and
+  **non-destructively merges** `<url>/**` into the redirect allow-list via the Supabase Management
+  API (token from the keychain, never echoed/argv). This changes **production auth config**, so it
+  needs an **explicit confirm** (it'll be gated like any prod change). Manual fallback: Supabase →
+  Auth → URL Configuration.
 
 ## Verify
 - Confirm the deployment is live (DO: poll `doctl apps get <id>`; Vercel: the CLI returns the URL).
