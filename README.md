@@ -57,8 +57,9 @@ The per-provider details and the full DNS story live in **[docs/PROVIDERS.md](do
 ## Roadmap
 
 - [x] Provider-agnostic `/deploy` — pick DO or Vercel inline ("choose your destiny").
-- [x] **Voice** v0 — an Apple Shortcut → headless-Claude bridge ("Hey Siri, shipmate, deploy
-      panogram"), safe by default (plan mode). See **[voice/](voice/)**.
+- [x] **Voice** v1 — conversational Apple Shortcut → headless-Claude bridge ("Hey Siri,
+      shipmate, deploy panogram" … "do it"): persistent sessions, background agent jobs,
+      push-back to CarPlay. Plan mode is code-enforced. See **[voice/](voice/)**.
 - [ ] **DNS automation** — host the domain on the provider and subdomains become fully hands-off.
 - [ ] **Alexa Skill** front-end (same bridge).
 - [ ] **MCP** — lean on the Model Context Protocol so providers can ship their *own* agent-callable
