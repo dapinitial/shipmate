@@ -287,7 +287,7 @@ latest_job() { # [running] — highest job id, optionally only running ones
 }
 
 verb_status() {
-  local d b st started now mins line="" project
+  local d b st started now mins line="" project appsh p plist phase
   now="$(date +%s)"
   for d in "$JOBS_DIR"/*/; do
     if [ -d "$d" ]; then
@@ -300,8 +300,45 @@ verb_status() {
       else line="$line Job $b on $project: $st."; fi
     fi
   done
+  # Live deploy state for every project in play (session + jobs) — "job done" is not
+  # "deployed", and a driver shouldn't have to hold that distinction.
+  appsh="$VOICE_DIR/../skills/deploy/bin/do-app.sh"
+  plist="$( { if [ -f "$STATE_DIR/session.project" ]; then cat "$STATE_DIR/session.project"; echo; fi
+              for d in "$JOBS_DIR"/*/; do
+                if [ -d "$d" ]; then cat "$d/project" 2>/dev/null; echo; fi
+              done; } | awk 'NF' | sort -u )"
+  while IFS= read -r p; do
+    [ -n "$p" ] && [ -f "$p/.do/app.yaml" ] || continue
+    phase="$(bash "$appsh" status "$p" 2>/dev/null | awk -F': *' '/^deploy:/{print $2}' | awk '{print $1}')"
+    [ -n "$phase" ] && line="$line $(basename "$p") production deploy: $phase."
+  done <<EOF
+$plist
+EOF
   if [ -n "$line" ]; then speak "$(printf '%s' "$line" | clip 1200)"
   else speak "No jobs yet. Say 'work on' something to start one."; fi
+}
+
+# verb_rollback <project dir> <mode> — deterministic (no model in the loop): a panicked
+# "roll back, confirm" is a code path. Plan mode describes; execute reverts via the DO API.
+verb_rollback() {
+  local project="$1" mode="$2" appsh out pname
+  appsh="$VOICE_DIR/../skills/deploy/bin/do-app.sh"
+  pname="$(basename "$project")"
+  if [ ! -f "$project/.do/app.yaml" ]; then
+    speak "Rollback is wired for DigitalOcean apps so far, and $pname doesn't have one. Tell me which project to roll back."
+    return 1
+  fi
+  if [ "$mode" = "execute" ]; then
+    if out="$(bash "$appsh" rollback "$project" --yes 2>&1)"; then
+      speak "Rolling back $pname to the previous successful deployment now — cost neutral. Ask me for status in a minute to confirm it's active."
+    else
+      speak "Rollback failed: $(printf '%s' "$out" | tail -n1 | clip 200)"
+      return 1
+    fi
+  else
+    out="$(bash "$appsh" status "$project" 2>&1 || true)"
+    speak "This would revert $pname to its previous successful deployment — cost neutral, and you can roll forward again by redeploying. Current state: $(printf '%s' "$out" | awk -F': *' '/^deploy:/{print $2}' | clip 120). To do it, say: roll back $pname, confirm."
+  fi
 }
 
 verb_result() { # <normalized phrase>
@@ -362,6 +399,10 @@ case "${1:-}" in
   --counsel-set)
     case "${2:-}" in on|off) counsel_toggle "$2"; exit 0 ;; esac
     speak "usage: --counsel-set <on|off>"; exit 1 ;;
+  --rollback)
+    PROJ="$(project_or_default "$(resolve_project "$(phrase_normalize "${2:-}")")")"
+    MODE="plan"; [ "${3:-}" = "--yes" ] && MODE="execute"
+    verb_rollback "$PROJ" "$MODE"; exit $? ;;
 esac
 
 PHRASE="${*:-}"
@@ -383,6 +424,7 @@ case "$VERB" in
   stop)   verb_stop "$CLEAN" ;;
   counsel_on)  counsel_toggle on ;;
   counsel_off) counsel_toggle off ;;
+  rollback) verb_rollback "$(project_or_default "$(resolve_project "$CLEAN")")" "$MODE" ;;
   counsel) counsel "$(phrase_counsel_question "$CLEAN")" "$(project_or_default "$(resolve_project "$CLEAN")")" ;;
   job)    dispatch_job "$(phrase_task "$CLEAN")" "$(project_or_default "$(resolve_project "$CLEAN")")" ;;
   say)    turn "$CLEAN" "$MODE" "$(project_or_default "$(resolve_project "$CLEAN")")" ;;

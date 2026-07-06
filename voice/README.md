@@ -30,7 +30,8 @@ by hand. Setup in **[apple-shortcut.md](apple-shortcut.md)**.
 | *"work on adding dark mode to panogram"* | **Background agent job.** Replies in 2 seconds, works for as long as it takes, pings your phone when done. Also: *"have an agent …"*, *"… in the background"*. |
 | *"counsel on whether we should move to Vercel"* | **Deliberate** (read-only, never acts). Toggle off (default): the default Anthropic model answers. Toggle on: a multi-model panel answers in parallel and a chair synthesizes, naming the dissent. Full transcript lands in `~/.shipmate/voice/last-counsel.txt`. |
 | *"counsel on"* / *"counsel off"* | Flip the deliberation toggle. |
-| *"status"* / *"how's it going?"* | Which jobs are running/done, and for how long. |
+| *"status"* / *"how's it going?"* | Jobs (running/done) **and** each project's live production deploy phase. |
+| *"roll back panogram"* → *"…confirm"* | Describe, then revert to the previous successful deployment — **deterministic** (no model in the loop), cost-neutral, DO for now. |
 | *"result"* / *"what happened with job 2?"* | Speaks a finished job's summary. |
 | *"stop job 2"* | Kills a running job. |
 | *"new session"* / *"start over"* | Forgets the current conversation. |

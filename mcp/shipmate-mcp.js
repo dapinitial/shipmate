@@ -153,6 +153,20 @@ const TOOLS = [
     },
   },
   {
+    name: 'shipmate_rollback',
+    description: 'Roll a project back to its previous successful deployment (DigitalOcean; ' +
+      'cost-neutral, reversible by redeploying). Without confirm:true it only DESCRIBES what ' +
+      'would happen; with confirm:true it acts, deterministically — no model in the loop.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        project: { type: 'string', description: 'Project name under the sites root' },
+        confirm: { type: 'boolean', description: 'true = actually roll back; false/omitted = describe only' },
+      },
+      required: ['project'],
+    },
+  },
+  {
     name: 'shipmate_counsel_toggle',
     description: 'Turn multi-model counsel deliberation on or off (off = single Anthropic model, the default).',
     inputSchema: {
@@ -188,6 +202,8 @@ async function callTool(name, args) {
       return wrap(await bridge(['--result', ...(a.job_id != null ? [String(a.job_id)] : [])]));
     case 'shipmate_task_stop':
       return wrap(await bridge(['--stop', ...(a.job_id != null ? [String(a.job_id)] : [])]));
+    case 'shipmate_rollback':
+      return wrap(await bridge(['--rollback', proj, ...(a.confirm === true ? ['--yes'] : [])]));
     case 'shipmate_counsel':
       return wrap(await bridge(['--counsel', proj, a.question]));
     case 'shipmate_counsel_toggle':
