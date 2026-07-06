@@ -43,6 +43,27 @@ OAuth are the production path — this is the experiment path.
 | `shipmate_task_result` | a finished job's summary | read-only |
 | `shipmate_task_stop` | stop a running job | — |
 
+## Onboarding new devices (`--onboard`)
+
+```bash
+node mcp/shipmate-mcp.js --onboard 8790
+```
+
+Serves a setup page at `http://<your-mac>.<tailnet>.ts.net:8790` — **bound to the Tailscale
+interface only** (it refuses to start without one, and never touches the funnel port), so
+joining your tailnet *is* the login. Tabs for each device type:
+
+- **iPhone**: ntfy topic (copy), the Siri Shortcut recipe with host/user/script prefilled,
+  a paste-box that validates + appends the Shortcut's SSH public key to
+  `~/.ssh/authorized_keys` (dedup, `0600`), and the Claude-app note (the connector is
+  account-level — nothing to configure per device).
+- **Laptop**: zero-install options (claude.ai already has the connector; `ssh` one-liner)
+  or promote it to a full host.
+- **New host Mac**: bootstrap commands (clone → install → doctor → `claude setup-token`).
+
+All values are derived at startup (user, tailnet name, repo URL, ntfy topic) — nothing
+hardcoded.
+
 ## The two-phase gate (the point of this server)
 
 `shipmate_execute` is refused **in code** unless `shipmate_plan` ran for the **same project**

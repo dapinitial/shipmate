@@ -262,8 +262,102 @@ function serveHttp(port) {
   });
 }
 
+// ---- onboarding UI (tailnet-only) ---------------------------------------------------------
+
+function tailscaleCmd(args) {
+  return new Promise((resolve) => {
+    const bins = ['tailscale', '/Applications/Tailscale.app/Contents/MacOS/Tailscale'];
+    const attempt = (i) => {
+      if (i >= bins.length) return resolve('');
+      execFile(bins[i], args, { timeout: 10000 }, (err, stdout) =>
+        err ? attempt(i + 1) : resolve((stdout || '').trim()));
+    };
+    attempt(0);
+  });
+}
+
+function readNtfyTopic() {
+  try {
+    const env = fs.readFileSync(path.join(os.homedir(), '.shipmate', 'voice.env'), 'utf8');
+    const m = env.match(/SHIPMATE_NTFY_TOPIC=([^\s'"]+)/);
+    return m ? m[1] : '';
+  } catch { return ''; }
+}
+
+function repoUrl() {
+  return new Promise((resolve) => {
+    execFile('git', ['-C', path.join(__dirname, '..'), 'remote', 'get-url', 'origin'],
+      { timeout: 10000 }, (err, stdout) => resolve(err ? '' : (stdout || '').trim()));
+  });
+}
+
+const SSH_KEY_RE = /^(ssh-(ed25519|rsa)|ecdsa-sha2-nistp(256|384|521)) [A-Za-z0-9+/]+={0,3}( [^\r\n]*)?$/;
+
+function addAuthorizedKey(raw) {
+  const key = String(raw || '').trim();
+  if (!SSH_KEY_RE.test(key))
+    return { ok: false, message: 'That does not look like an SSH public key (expected e.g. "ssh-ed25519 AAAA…").' };
+  const file = process.env.SHIPMATE_AUTHORIZED_KEYS
+    || path.join(os.homedir(), '.ssh', 'authorized_keys');
+  fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
+  let existing = '';
+  try { existing = fs.readFileSync(file, 'utf8'); } catch {}
+  const keyBody = key.split(' ').slice(0, 2).join(' ');
+  if (existing.split('\n').some((l) => l.trim().startsWith(keyBody)))
+    return { ok: true, message: 'That key is already authorized — you are good to go.' };
+  fs.appendFileSync(file, (existing && !existing.endsWith('\n') ? '\n' : '') + key + '\n', { mode: 0o600 });
+  try { fs.chmodSync(file, 0o600); } catch {}
+  return { ok: true, message: 'Key added. Run the Shortcut — the Mac trusts this device now.' };
+}
+
+async function serveOnboard(port) {
+  const ip = await tailscaleCmd(['ip', '-4']);
+  if (!/^100\./.test(ip)) {
+    log('cannot find a Tailscale IPv4 address — is Tailscale up? Refusing to serve onboarding anywhere else.');
+    process.exit(1);
+  }
+  const dns = JSON.parse(await tailscaleCmd(['status', '--json']) || '{}');
+  const tailnetName = ((dns.Self || {}).DNSName || '').replace(/\.$/, '') || ip;
+  const html = fs.readFileSync(path.join(__dirname, 'onboard.html'));
+  const info = {
+    user: os.userInfo().username,
+    tailnetName,
+    bridgePath: '~/' + path.relative(os.homedir(), BRIDGE),
+    ntfyTopic: readNtfyTopic(),
+    repoUrl: await repoUrl(),
+  };
+
+  http.createServer((req, res) => {
+    const url = req.url.split('?')[0];
+    if (req.method === 'GET' && (url === '/' || url === '/index.html')) {
+      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+      return res.end(html);
+    }
+    if (req.method === 'GET' && url === '/api/info') {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify(info));
+    }
+    if (req.method === 'POST' && url === '/api/add-key') {
+      let body = '';
+      req.on('data', (c) => { body += c; if (body.length > 65536) req.destroy(); });
+      req.on('end', () => {
+        let out;
+        try { out = addAuthorizedKey(JSON.parse(body).key); }
+        catch (e) { out = { ok: false, message: 'Bad request: ' + e.message }; }
+        res.writeHead(out.ok ? 200 : 400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(out));
+      });
+      return;
+    }
+    res.writeHead(404); res.end();
+  }).listen(port, ip, () => {
+    log(`onboarding UI on http://${tailnetName}:${port} (tailnet only — bound to ${ip})`);
+  });
+}
+
 // ---- main --------------------------------------------------------------------------------
 
 const argv = process.argv.slice(2);
 if (argv[0] === '--http') serveHttp(parseInt(argv[1], 10) || 8787);
+else if (argv[0] === '--onboard') serveOnboard(parseInt(argv[1], 10) || 8790);
 else serveStdio();

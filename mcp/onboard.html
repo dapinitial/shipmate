@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>shipmate — add a device</title>
+<style>
+  :root { --bg:#0b1020; --card:#141b31; --ink:#e8ecf8; --dim:#94a3c0; --acc:#4da3ff; --ok:#39d98a; }
+  @media (prefers-color-scheme: light) {
+    :root { --bg:#f4f6fb; --card:#ffffff; --ink:#16203a; --dim:#5a6b8c; --acc:#0b6fd6; --ok:#0c8f57; }
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; font:16px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+         background:var(--bg); color:var(--ink); padding:1.2rem; }
+  .wrap { max-width:680px; margin:0 auto; }
+  h1 { font-size:1.5rem; margin:.4rem 0 0; } h1 span{ opacity:.6; font-weight:400; }
+  p.sub { color:var(--dim); margin:.3rem 0 1.2rem; }
+  .tabs { display:flex; gap:.5rem; margin-bottom:1rem; flex-wrap:wrap; }
+  .tabs button { flex:1; min-width:140px; padding:.7rem .6rem; border:0; border-radius:.7rem;
+    background:var(--card); color:var(--dim); font-size:1rem; cursor:pointer; }
+  .tabs button.on { color:var(--ink); outline:2px solid var(--acc); }
+  .card { background:var(--card); border-radius:.9rem; padding:1rem 1.1rem; margin:.8rem 0; }
+  .card h2 { font-size:1.02rem; margin:.1rem 0 .4rem; }
+  .card .n { display:inline-block; background:var(--acc); color:#fff; border-radius:99px;
+    width:1.5rem; height:1.5rem; text-align:center; line-height:1.5rem; font-size:.9rem; margin-right:.45rem; }
+  code, .mono { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:.86em; }
+  .copy { display:flex; gap:.5rem; align-items:center; background:rgba(125,150,255,.08);
+    border-radius:.55rem; padding:.55rem .7rem; margin:.5rem 0; overflow-x:auto; }
+  .copy code { white-space:pre; flex:1; }
+  .copy button, .keyform button { border:0; border-radius:.5rem; background:var(--acc); color:#fff;
+    padding:.45rem .8rem; font-size:.9rem; cursor:pointer; flex-shrink:0; }
+  .dim { color:var(--dim); font-size:.92em; }
+  .pane { display:none; } .pane.on { display:block; }
+  textarea { width:100%; min-height:5.5rem; border-radius:.55rem; border:1px solid rgba(125,150,255,.3);
+    background:transparent; color:var(--ink); padding:.6rem; font-family:ui-monospace,Menlo,monospace; font-size:.8rem; }
+  .msg { margin:.4rem 0 0; font-size:.92em; } .msg.ok{ color:var(--ok); } .msg.err{ color:#ff7a7a; }
+  a { color:var(--acc); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>⚓ shipmate <span>— add a device</span></h1>
+  <p class="sub">You're seeing this because this device is on the tailnet — that's the only
+  way in. Pick what you're setting up.</p>
+
+  <div class="tabs">
+    <button data-p="phone" class="on">📱 iPhone</button>
+    <button data-p="laptop">💻 Laptop</button>
+    <button data-p="host">🖥 New host Mac</button>
+  </div>
+
+  <!-- ============ iPhone ============ -->
+  <div class="pane on" id="phone">
+    <div class="card"><h2><span class="n">1</span>Tailscale — done ✓</h2>
+      <p class="dim">You're reading this page over it.</p></div>
+
+    <div class="card"><h2><span class="n">2</span>Pushes: ntfy</h2>
+      <p>Install <a href="https://apps.apple.com/app/ntfy/id1625396347">ntfy</a>, then
+      subscribe to this topic (job-done notifications ride it to CarPlay):</p>
+      <div class="copy"><code id="ntfy">…</code><button onclick="cp('ntfy')">Copy</button></div>
+    </div>
+
+    <div class="card"><h2><span class="n">3</span>Siri Shortcut</h2>
+      <p>Shortcuts app → ＋ → name it (the name is the Siri phrase). Actions, in order:
+      <b>Dictate Text</b> → <b>Run Script Over SSH</b> (Input = Dictated Text) → <b>Speak Text</b>
+      (= Shell Script Result).</p>
+      <p>SSH settings — host, user, and script:</p>
+      <div class="copy"><code id="sshhost">…</code><button onclick="cp('sshhost')">Copy</button></div>
+      <div class="copy"><code id="sshuser">…</code><button onclick="cp('sshuser')">Copy</button></div>
+      <div class="copy"><code id="script">…</code><button onclick="cp('script')">Copy</button></div>
+      <p class="dim">Authentication: SSH Key → tap it → Copy Public Key → paste it in step 4.
+      For a road-trip conversation loop, wrap the three actions in a Repeat&nbsp;(10).</p>
+    </div>
+
+    <div class="card"><h2><span class="n">4</span>Authorize this phone's key</h2>
+      <p>Paste the public key the Shortcut generated:</p>
+      <form class="keyform" onsubmit="return addKey(event)">
+        <textarea id="pubkey" placeholder="ssh-ed25519 AAAA… shortcut-key"></textarea>
+        <p><button type="submit">Add key to the Mac</button></p>
+        <p class="msg" id="keymsg"></p>
+      </form>
+    </div>
+
+    <div class="card"><h2><span class="n">5</span>Claude app voice mode</h2>
+      <p>Nothing to configure — the shipmate connector lives on your Claude <i>account</i>.
+      Open the Claude app → new chat → enable the shipmate connector → tap voice mode → talk
+      to your fleet.</p></div>
+  </div>
+
+  <!-- ============ Laptop ============ -->
+  <div class="pane" id="laptop">
+    <div class="card"><h2><span class="n">1</span>Tailscale — done ✓</h2>
+      <p class="dim">You're reading this page over it (works fine over Starlink, hotel Wi-Fi,
+      a phone hotspot…).</p></div>
+
+    <div class="card"><h2><span class="n">2</span>Pick your depth</h2>
+      <p><b>Zero-install:</b> claude.ai in the browser already has the shipmate connector
+      (account-level) — plan, execute, and check jobs from any tab.</p>
+      <p><b>Terminal:</b> SSH into the host and drive it directly:</p>
+      <div class="copy"><code id="sshline">…</code><button onclick="cp('sshline')">Copy</button></div>
+      <p><b>Full host:</b> switch to the "New host Mac" tab to make this laptop a second brain
+      (needs its own provider CLIs + Claude login).</p>
+    </div>
+  </div>
+
+  <!-- ============ New host ============ -->
+  <div class="pane" id="host">
+    <div class="card"><h2><span class="n">1</span>Bootstrap</h2>
+      <div class="copy"><code id="boot">…</code><button onclick="cp('boot')">Copy</button></div>
+      <p class="dim"><code>doctor.sh</code> tells you which CLIs/auth are missing — install
+      what it flags (doctl, gh, …).</p></div>
+
+    <div class="card"><h2><span class="n">2</span>Headless auth</h2>
+      <p>SSH sessions can't read the macOS Keychain, so mint a token and stash it:</p>
+      <div class="copy"><code id="setup">…</code><button onclick="cp('setup')">Copy</button></div>
+    </div>
+
+    <div class="card"><h2><span class="n">3</span>Voice + MCP</h2>
+      <p>Enable Remote Login (System Settings → Sharing), join this tailnet, then follow
+      <span class="mono">voice/README.md</span> and <span class="mono">mcp/README.md</span> —
+      they're short. Point your Shortcuts at the new host's tailnet name to use it instead.</p></div>
+  </div>
+
+  <p class="dim" style="margin-top:1.4rem">Served by <span class="mono">shipmate-mcp --onboard</span>,
+  bound to the Tailscale interface only — never the public funnel.</p>
+</div>
+<script>
+  document.querySelectorAll('.tabs button').forEach(b => b.onclick = () => {
+    document.querySelectorAll('.tabs button').forEach(x => x.classList.remove('on'));
+    document.querySelectorAll('.pane').forEach(x => x.classList.remove('on'));
+    b.classList.add('on'); document.getElementById(b.dataset.p).classList.add('on');
+  });
+  function cp(id){ navigator.clipboard.writeText(document.getElementById(id).textContent); }
+  async function addKey(e){
+    e.preventDefault();
+    const m = document.getElementById('keymsg');
+    const r = await fetch('/api/add-key', { method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ key: document.getElementById('pubkey').value }) });
+    const j = await r.json();
+    m.textContent = j.message; m.className = 'msg ' + (j.ok ? 'ok' : 'err');
+    return false;
+  }
+  fetch('/api/info').then(r => r.json()).then(i => {
+    const set = (id, v) => document.getElementById(id).textContent = v;
+    set('ntfy', i.ntfyTopic || '(not configured — see voice/README.md)');
+    set('sshhost', i.tailnetName);
+    set('sshuser', i.user);
+    set('script', 'bash ' + i.bridgePath);
+    set('sshline', 'ssh ' + i.user + '@' + i.tailnetName);
+    set('boot', 'git clone ' + i.repoUrl + ' && cd shipmate && ./install.sh && bash skills/deploy/bin/doctor.sh');
+    set('setup', 'claude setup-token   # then: echo \'export CLAUDE_CODE_OAUTH_TOKEN=<it>\' >> ~/.shipmate/voice.env && chmod 600 ~/.shipmate/voice.env');
+  });
+</script>
+</body>
+</html>
