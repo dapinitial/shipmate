@@ -4,8 +4,10 @@
 DigitalOcean, Vercel, and (soon) anywhere — you pick the destination, shipmate handles the build,
 the host, the DNS, and the certificate. One command instead of an afternoon of dashboard clicking.
 
-> Today it's a [Claude Code](https://claude.ai/code) skill: say *"deploy this"* and it runs the
-> whole dance. The roadmap is **voice** — *"Hey shipmate, I'm ready to ship"* — across any provider.
+> It's a [Claude Code](https://claude.ai/code) skill — say *"deploy this"* and it runs the whole
+> dance — and it's **voice**: *"Hey Siri, shipmate — deploy panogram… ship it"* from CarPlay, or a
+> continuous conversation in the Claude app (via [MCP](mcp/)) while background agents build,
+> test, and wait for your go.
 
 ## Why
 
@@ -62,8 +64,11 @@ The per-provider details and the full DNS story live in **[docs/PROVIDERS.md](do
       push-back to CarPlay. Plan mode is code-enforced. See **[voice/](voice/)**.
 - [ ] **DNS automation** — host the domain on the provider and subdomains become fully hands-off.
 - [ ] **Alexa Skill** front-end (same bridge).
-- [ ] **MCP** — lean on the Model Context Protocol so providers can ship their *own* agent-callable
-      skills, and shipmate composes them.
+- [x] **MCP server** — the engine as agent-callable tools (plan/execute/status/jobs) with the
+      plan→confirm gate enforced in code; drivable from the Claude iOS app's **voice mode** as a
+      custom connector, with a tailnet-only **device onboarding page**. See **[mcp/](mcp/)**.
+- [ ] **MCP ecosystem** — providers ship their *own* agent-callable skills (Cloudflare, Stripe,
+      GitHub already do); shipmate becomes the orchestration + safety layer that composes them.
 
 Full thinking in **[docs/ROADMAP.md](docs/ROADMAP.md)**.
 
