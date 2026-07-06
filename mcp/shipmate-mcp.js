@@ -1,24 +1,31 @@
 #!/usr/bin/env node
 /*
- * shipmate-mcp — a zero-dependency MCP server (stdio, JSON-RPC 2.0) over the shipmate engine.
+ * shipmate-mcp — a zero-dependency MCP server over the shipmate engine.
  *
- * Any MCP client (Claude Code, the Claude apps via a connector, …) gets these tools:
+ * Transports:
+ *   stdio (default)         claude mcp add --scope user shipmate -- node .../mcp/shipmate-mcp.js
+ *   Streamable HTTP         node .../mcp/shipmate-mcp.js --http [port]     (default 8787)
+ *     Binds 127.0.0.1 ONLY. Publish with Tailscale Funnel; the endpoint path embeds a long
+ *     random token (~/.shipmate/mcp/http-token, minted on first run):  POST /mcp/<token>
+ *     Anything else is 404. See mcp/README.md for the funnel + claude.ai connector steps.
+ *
+ * Tools (both transports):
  *   shipmate_plan      — describe what a request would do + cost. Read-only, always safe.
  *   shipmate_execute   — act. STRUCTURALLY gated: only works within 10 minutes of a
  *                        shipmate_plan for the same project, and the grant is single-use.
- *                        A client cannot execute what was never planned.
  *   shipmate_status    — running/finished background jobs.
  *   shipmate_task_start / shipmate_task_result / shipmate_task_stop — background agent jobs
  *                        (branch-only, never deploy/bill — the bridge enforces the rules).
  *
  * It shells out to voice/shipmate-voice.sh's machine interface, so voice and MCP are two
- * mouths on one tested engine. Register for local use:
- *   claude mcp add --scope user shipmate -- node ~/Sites/shipmate/mcp/shipmate-mcp.js
+ * mouths on one tested engine.
  */
 'use strict';
 
 const { execFile } = require('child_process');
+const crypto = require('crypto');
 const fs = require('fs');
+const http = require('http');
 const path = require('path');
 const os = require('os');
 const readline = require('readline');
@@ -26,20 +33,23 @@ const readline = require('readline');
 const BRIDGE = path.join(__dirname, '..', 'voice', 'shipmate-voice.sh');
 const STATE_DIR = path.join(os.homedir(), '.shipmate', 'mcp');
 const PLAN_GRANT = path.join(STATE_DIR, 'plan-grant.json');
+const TOKEN_FILE = path.join(STATE_DIR, 'http-token');
 const PLAN_TTL_MS = 10 * 60 * 1000;
 const TURN_TIMEOUT_MS = 10 * 60 * 1000;
 
 const log = (...a) => console.error('[shipmate-mcp]', ...a);
 
-function bridge(args, cb) {
-  execFile('bash', [BRIDGE, ...args],
-    { timeout: TURN_TIMEOUT_MS, maxBuffer: 10 * 1024 * 1024 },
-    (err, stdout, stderr) => {
-      // The bridge speaks errors on stdout by design; prefer its words over exit codes.
-      const text = (stdout || '').trim() || (stderr || '').trim()
-        || (err ? `shipmate bridge failed: ${err.message}` : '');
-      cb(err && !stdout ? err : null, text);
-    });
+function bridge(args) {
+  return new Promise((resolve) => {
+    execFile('bash', [BRIDGE, ...args],
+      { timeout: TURN_TIMEOUT_MS, maxBuffer: 10 * 1024 * 1024 },
+      (err, stdout, stderr) => {
+        // The bridge speaks errors on stdout by design; prefer its words over exit codes.
+        const text = (stdout || '').trim() || (stderr || '').trim()
+          || (err ? `shipmate bridge failed: ${err.message}` : '');
+        resolve({ text, isError: !!err && !(stdout || '').trim() });
+      });
+  });
 }
 
 // ---- two-phase gate ------------------------------------------------------------------
@@ -129,77 +139,131 @@ const TOOLS = [
   },
 ];
 
-function callTool(name, args, respond) {
+async function callTool(name, args) {
   const a = args || {};
   const proj = a.project || '-';
-  const text = (t, isError) => respond({ content: [{ type: 'text', text: t }], ...(isError ? { isError: true } : {}) });
+  const wrap = ({ text, isError }) =>
+    ({ content: [{ type: 'text', text }], ...(isError ? { isError: true } : {}) });
 
   switch (name) {
-    case 'shipmate_plan':
-      return bridge(['--turn', 'plan', proj, a.request], (err, out) => {
-        if (!err) grantPlan(a.project || '-');
-        text(out, !!err);
-      });
+    case 'shipmate_plan': {
+      const r = await bridge(['--turn', 'plan', proj, a.request]);
+      if (!r.isError) grantPlan(a.project || '-');
+      return wrap(r);
+    }
     case 'shipmate_execute': {
       const refusal = takeGrant(a.project || '-');
-      if (refusal) return text(refusal, true);
-      return bridge(['--turn', 'execute', proj, a.request], (err, out) => text(out, !!err));
+      if (refusal) return wrap({ text: refusal, isError: true });
+      return wrap(await bridge(['--turn', 'execute', proj, a.request]));
     }
     case 'shipmate_status':
-      return bridge(['--status-report'], (err, out) => text(out, !!err));
+      return wrap(await bridge(['--status-report']));
     case 'shipmate_task_start':
-      return bridge(['--dispatch', proj, a.task], (err, out) => text(out, !!err));
+      return wrap(await bridge(['--dispatch', proj, a.task]));
     case 'shipmate_task_result':
-      return bridge(['--result', ...(a.job_id != null ? [String(a.job_id)] : [])], (err, out) => text(out, !!err));
+      return wrap(await bridge(['--result', ...(a.job_id != null ? [String(a.job_id)] : [])]));
     case 'shipmate_task_stop':
-      return bridge(['--stop', ...(a.job_id != null ? [String(a.job_id)] : [])], (err, out) => text(out, !!err));
+      return wrap(await bridge(['--stop', ...(a.job_id != null ? [String(a.job_id)] : [])]));
     default:
-      return respond(null, { code: -32602, message: `unknown tool: ${name}` });
+      throw Object.assign(new Error(`unknown tool: ${name}`), { code: -32602 });
   }
 }
 
-// ---- JSON-RPC over stdio ---------------------------------------------------------------
+// ---- JSON-RPC core (transport-independent) ---------------------------------------------
 
-const out = (msg) => process.stdout.write(JSON.stringify(msg) + '\n');
-
-function handle(msg) {
+// Returns the response object for a request, or null for a notification.
+async function handle(msg) {
   const { id, method, params } = msg;
-  const reply = (result) => id !== undefined && out({ jsonrpc: '2.0', id, result });
-  const fail = (error) => id !== undefined && out({ jsonrpc: '2.0', id, error });
+  const isNotification = id === undefined;
+  const reply = (result) => (isNotification ? null : { jsonrpc: '2.0', id, result });
+  const fail = (code, message) => (isNotification ? null : { jsonrpc: '2.0', id, error: { code, message } });
 
   switch (method) {
     case 'initialize':
       return reply({
         protocolVersion: (params && params.protocolVersion) || '2025-06-18',
         capabilities: { tools: {} },
-        serverInfo: { name: 'shipmate', version: '0.1.0' },
+        serverInfo: { name: 'shipmate', version: '0.2.0' },
       });
     case 'notifications/initialized':
     case 'notifications/cancelled':
-      return; // notifications get no response
+      return null;
     case 'ping':
       return reply({});
     case 'tools/list':
       return reply({ tools: TOOLS });
     case 'tools/call':
-      return callTool(params.name, params.arguments, (result, error) =>
-        error ? fail(error) : reply(result));
+      try { return reply(await callTool(params.name, params.arguments)); }
+      catch (e) { return fail(e.code || -32603, e.message); }
     default:
-      return fail({ code: -32601, message: `method not found: ${method}` });
+      return fail(-32601, `method not found: ${method}`);
   }
 }
 
-readline.createInterface({ input: process.stdin, terminal: false }).on('line', (line) => {
-  line = line.trim();
-  if (!line) return;
-  let msg;
-  try { msg = JSON.parse(line); }
-  catch { return out({ jsonrpc: '2.0', id: null, error: { code: -32700, message: 'parse error' } }); }
-  try { handle(msg); }
-  catch (e) {
-    log('handler error:', e.message);
-    if (msg.id !== undefined) out({ jsonrpc: '2.0', id: msg.id, error: { code: -32603, message: e.message } });
-  }
-});
+// ---- stdio transport --------------------------------------------------------------------
 
-log(`serving shipmate tools over stdio (bridge: ${BRIDGE})`);
+function serveStdio() {
+  const out = (m) => m && process.stdout.write(JSON.stringify(m) + '\n');
+  readline.createInterface({ input: process.stdin, terminal: false }).on('line', async (line) => {
+    line = line.trim();
+    if (!line) return;
+    let msg;
+    try { msg = JSON.parse(line); }
+    catch { return out({ jsonrpc: '2.0', id: null, error: { code: -32700, message: 'parse error' } }); }
+    out(await handle(msg).catch((e) => ({ jsonrpc: '2.0', id: msg.id, error: { code: -32603, message: e.message } })));
+  });
+  log(`serving shipmate tools over stdio (bridge: ${BRIDGE})`);
+}
+
+// ---- Streamable HTTP transport ------------------------------------------------------------
+
+function httpToken() {
+  try {
+    const t = fs.readFileSync(TOKEN_FILE, 'utf8').trim();
+    if (t.length >= 32) return t;
+  } catch {}
+  const t = crypto.randomBytes(24).toString('hex');
+  fs.mkdirSync(STATE_DIR, { recursive: true });
+  fs.writeFileSync(TOKEN_FILE, t + '\n', { mode: 0o600 });
+  return t;
+}
+
+function serveHttp(port) {
+  const token = httpToken();
+  const endpoint = `/mcp/${token}`;
+  const server = http.createServer((req, res) => {
+    // Constant-ish path check; everything but the token path is a plain 404.
+    if (req.url.split('?')[0] !== endpoint) { res.writeHead(404); return res.end(); }
+    if (req.method === 'GET') { res.writeHead(405, { Allow: 'POST' }); return res.end(); }
+    if (req.method === 'DELETE') { res.writeHead(200); return res.end(); } // stateless: nothing to tear down
+    if (req.method !== 'POST') { res.writeHead(405, { Allow: 'POST' }); return res.end(); }
+
+    let body = '';
+    req.on('data', (c) => { body += c; if (body.length > 1e6) req.destroy(); });
+    req.on('end', async () => {
+      let msg;
+      try { msg = JSON.parse(body); }
+      catch {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify({ jsonrpc: '2.0', id: null, error: { code: -32700, message: 'parse error' } }));
+      }
+      const msgs = Array.isArray(msg) ? msg : [msg];
+      const replies = (await Promise.all(msgs.map((m) =>
+        handle(m).catch((e) => ({ jsonrpc: '2.0', id: m.id, error: { code: -32603, message: e.message } }))
+      ))).filter(Boolean);
+      if (!replies.length) { res.writeHead(202); return res.end(); } // notifications only
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(Array.isArray(msg) ? replies : replies[0]));
+    });
+  });
+  server.listen(port, '127.0.0.1', () => {
+    log(`serving Streamable HTTP on http://127.0.0.1:${port}${endpoint}`);
+    log('publish with:  tailscale funnel --bg ' + port);
+  });
+}
+
+// ---- main --------------------------------------------------------------------------------
+
+const argv = process.argv.slice(2);
+if (argv[0] === '--http') serveHttp(parseInt(argv[1], 10) || 8787);
+else serveStdio();

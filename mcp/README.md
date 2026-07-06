@@ -15,6 +15,23 @@ claude mcp add --scope user shipmate -- node ~/Sites/shipmate/mcp/shipmate-mcp.j
 
 Then from any session: "use shipmate_plan to see what deploying this would cost."
 
+## HTTP transport (for the Claude apps as a custom connector)
+
+```bash
+node mcp/shipmate-mcp.js --http 8788        # binds 127.0.0.1 ONLY
+tailscale funnel --bg 8788                  # public HTTPS via your tailnet name
+```
+
+The endpoint is `https://<your-mac>.<tailnet>.ts.net/mcp/<token>` where `<token>` is a
+48-hex-char secret minted into `~/.shipmate/mcp/http-token` (0600) on first run. Every other
+path 404s. Add that URL at claude.ai → Settings → Connectors → **Add custom connector**.
+
+**Be clear-eyed about the trade:** the URL is a bearer secret for a server that can deploy
+your apps and start agent jobs. TLS terminates on your Mac (relays see ciphertext), execute
+stays behind the plan grant, but whoever holds the URL holds the keys. Treat it like a
+password; `tailscale funnel --https=443 off` kills public access instantly. A LaunchAgent +
+OAuth are the production path — this is the experiment path.
+
 ## Tools
 
 | Tool | Does | Safety |
