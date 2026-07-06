@@ -93,8 +93,10 @@ ask for *"status"*.
 - [x] Headless permission gating — plan turns run under `--permission-mode plan` (code-enforced).
 - [x] Project resolution from the phrase ("deploy panogram" → `~/Sites/panogram`).
 - [x] Multi-turn sessions (`--resume`), background jobs, push-back channel.
-- [ ] Out-of-band confirm for billable steps (a phone tap, not just a spoken word) — the ntfy
-      channel is the natural carrier for this.
+- [x] Out-of-band confirm for billable steps: execute turns that would create new spend run
+      `request-approval.sh`, which pushes an ntfy notification with **Approve / Deny buttons**
+      that hit the tailnet-only server — reading the notification isn't enough to approve;
+      the tap must come from one of your own devices. Fails closed (no tap = not approved).
 - [x] `shipmate-mcp` v0: plan/execute/status/jobs as MCP tools over this same engine, with
       the plan→confirm gate enforced in code. See [mcp/](../mcp/). (HTTP transport for the
       Claude apps: next.)

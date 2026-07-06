@@ -396,11 +396,32 @@ async function serveOnboard(port) {
     repoUrl: await repoUrl(),
   };
 
+  const APPROVALS = process.env.SHIPMATE_APPROVALS_DIR
+    || path.join(os.homedir(), '.shipmate', 'approvals');
+
   http.createServer((req, res) => {
     const url = req.url.split('?')[0];
     if (req.method === 'GET' && (url === '/' || url === '/index.html')) {
       res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
       return res.end(html);
+    }
+    // Tap-to-confirm: ntfy action buttons land here. Tailnet-only by construction —
+    // this server never binds anywhere else — so reading the notification is not
+    // enough to approve; you must be one of the user's own devices.
+    const ap = url.match(/^\/(approve|deny)\/([a-f0-9]{16,64})$/);
+    if (ap) {
+      const file = path.join(APPROVALS, ap[2]);
+      let lines;
+      try { lines = fs.readFileSync(file, 'utf8').split('\n'); }
+      catch { res.writeHead(404); return res.end('unknown or expired approval'); }
+      const done = (msg) => { res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' }); res.end(msg); };
+      if (!lines[0].startsWith('pending')) return done(`already ${lines[0].split(' ')[0]}`);
+      const verdict = ap[1] === 'approve' ? 'approved' : 'denied';
+      fs.writeFileSync(file, [`${verdict} ${Date.now()}`, ...lines.slice(1)].join('\n'), { mode: 0o600 });
+      log(`approval ${ap[2].slice(0, 8)}…: ${verdict} (${(lines[1] || '').slice(0, 80)})`);
+      return done(verdict === 'approved'
+        ? '✅ Approved — shipmate will proceed.'
+        : '❌ Denied — shipmate will stop and report.');
     }
     if (req.method === 'GET' && url === '/api/info') {
       res.writeHead(200, { 'Content-Type': 'application/json' });

@@ -122,7 +122,7 @@ project_or_default() {
 
 turn() { # <phrase> <mode:plan|execute> <project dir>
   local phrase="$1" mode="$2" project="$3"
-  local sid="" old_project="" perm prompt out result new_sid err exec_tools=""
+  local sid="" old_project="" perm prompt out result new_sid err exec_tools="" approve_sh
   if [ -f "$STATE_DIR/session.id" ]; then sid="$(cat "$STATE_DIR/session.id")"; fi
   if [ -f "$STATE_DIR/session.project" ]; then old_project="$(cat "$STATE_DIR/session.project")"; fi
   # A different project means a different cwd — start a fresh session there.
@@ -133,8 +133,9 @@ turn() { # <phrase> <mode:plan|execute> <project dir>
     perm="acceptEdits"
     # Execute turns may drive the deploy toolchain non-interactively; everything else
     # still needs on-screen approval. Override the list via SHIPMATE_VOICE_EXECUTE_TOOLS.
-    exec_tools="${SHIPMATE_VOICE_EXECUTE_TOOLS:-Bash(git:*),Bash(npm:*),Bash(doctl:*),Bash(vercel:*),Bash(gh:*)}"
-    prompt="Spoken request (hands-free driver; reply short enough to read aloud, plain prose, no markdown): \"$phrase\". Mode=EXECUTE: the user has explicitly confirmed — act now, don't re-ask. Cost-neutral steps (git merge, build, push, redeploying an existing app) proceed without hesitation; always state the monthly cost in your reply. Stop and describe instead ONLY for: creating new billed resources, raising cost (resize, scale), or deleting resources or user data."
+    approve_sh="$VOICE_DIR/../skills/deploy/bin/request-approval.sh"
+    exec_tools="${SHIPMATE_VOICE_EXECUTE_TOOLS:-Bash(git:*),Bash(npm:*),Bash(doctl:*),Bash(vercel:*),Bash(gh:*)},Bash($approve_sh:*)"
+    prompt="Spoken request (hands-free driver; reply short enough to read aloud, plain prose, no markdown): \"$phrase\". Mode=EXECUTE: the user has explicitly confirmed — act now, don't re-ask. Cost-neutral steps (git merge, build, push, redeploying an existing app) proceed without hesitation; always state the monthly cost in your reply. For a step that creates NEW billed resources or raises cost (new app, resize, scale): request an out-of-band tap by running $approve_sh 'one-line description with the exact monthly cost' — proceed only if it prints APPROVED; on DENIED or TIMEOUT, stop and say so. NEVER delete resources or user data from a voice session."
   else
     perm="plan"
     prompt="Spoken request (hands-free driver; reply short enough to read aloud, plain prose, no markdown): \"$phrase\". Mode=PLAN: say what you would do and the exact monthly cost. Create, change, charge, or publish NOTHING."

@@ -97,4 +97,5 @@ proceed; creating new billed resources, resizing, or deleting stops and describe
       conversational front-end; the Siri bridge is the wake-word/one-shot channel.
 - [ ] Run the HTTP server + funnel as a LaunchAgent (today it dies on reboot).
 - [ ] OAuth in place of the bearer URL.
-- [ ] Out-of-band confirm for billable steps: ntfy action buttons hitting a local callback.
+- [x] Out-of-band confirm for billable steps: `request-approval.sh` + ntfy action buttons
+      hitting the tailnet-only server (`/approve/<nonce>`, `/deny/<nonce>`); fails closed.
