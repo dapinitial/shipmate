@@ -338,14 +338,39 @@ function addAuthorizedKey(raw) {
   return { ok: true, message: 'Key added. Run the Shortcut — the Mac trusts this device now.' };
 }
 
+// The Tailscale IP straight from the interfaces (100.64.0.0/10) — no CLI, which the GUI
+// app's binary refuses to be under launchd.
+function tailscaleIP() {
+  const ifs = os.networkInterfaces();
+  for (const name of Object.keys(ifs)) {
+    for (const a of ifs[name] || []) {
+      if (a.family !== 'IPv4' || a.internal) continue;
+      const o = a.address.split('.').map(Number);
+      if (o[0] === 100 && o[1] >= 64 && o[1] <= 127) return a.address;
+    }
+  }
+  return '';
+}
+
 async function serveOnboard(port) {
-  const ip = await tailscaleCmd(['ip', '-4']);
-  if (!/^100\./.test(ip)) {
-    log('cannot find a Tailscale IPv4 address — is Tailscale up? Refusing to serve onboarding anywhere else.');
+  // At boot, launchd may start us before Tailscale is up — wait for it rather than die.
+  let ip = '';
+  for (let i = 0; i < 24; i++) {
+    ip = tailscaleIP();
+    if (ip) break;
+    if (i === 0) log('waiting for a Tailscale IPv4 address…');
+    await new Promise((r) => setTimeout(r, 5000));
+  }
+  if (!ip) {
+    log('no Tailscale IPv4 address after 2 minutes — refusing to serve onboarding anywhere else.');
     process.exit(1);
   }
-  const dns = JSON.parse(await tailscaleCmd(['status', '--json']) || '{}');
-  const tailnetName = ((dns.Self || {}).DNSName || '').replace(/\.$/, '') || ip;
+  // Nice-to-have only: the MagicDNS name via the CLI, falling back to the IP.
+  let tailnetName = ip;
+  try {
+    const dns = JSON.parse(await tailscaleCmd(['status', '--json']) || '{}');
+    tailnetName = ((dns.Self || {}).DNSName || '').replace(/\.$/, '') || ip;
+  } catch {}
   const html = fs.readFileSync(path.join(__dirname, 'onboard.html'));
   const info = {
     user: os.userInfo().username,
