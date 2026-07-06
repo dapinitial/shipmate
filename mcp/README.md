@@ -56,9 +56,10 @@ proceed; creating new billed resources, resizing, or deleting stops and describe
 ## Roadmap (Phase 4 of docs/ROADMAP.md)
 
 - [x] v0: stdio server over the bridge's machine interface; two-phase plan/execute in code.
-- [ ] Streamable HTTP transport behind Tailscale (serve/funnel) + bearer auth, so the Claude
-      apps can reach it as a custom connector.
-- [ ] Test the Claude iOS app's **voice mode** against the connector — if voice mode can call
-      MCP tools, the phone app becomes the conversational front-end (the Siri bridge stays as
-      the fallback).
+- [x] Streamable HTTP transport + Tailscale Funnel + token-in-path; registered as a claude.ai
+      custom connector.
+- [x] **Confirmed: the Claude iOS app's voice mode calls these tools.** The phone app is the
+      conversational front-end; the Siri bridge is the wake-word/one-shot channel.
+- [ ] Run the HTTP server + funnel as a LaunchAgent (today it dies on reboot).
+- [ ] OAuth in place of the bearer URL.
 - [ ] Out-of-band confirm for billable steps: ntfy action buttons hitting a local callback.

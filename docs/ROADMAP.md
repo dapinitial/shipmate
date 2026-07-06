@@ -34,8 +34,11 @@ The industry is heading toward providers exposing agent-callable tools (**MCP** 
 Model Context Protocol; Cloudflare, Stripe, GitHub already ship servers).
 - [x] **shipmate as an MCP server** (v0, stdio): plan/execute/status/jobs as tools, with the
       plan→confirm gate enforced in code (single-use, 10-minute grant). See [mcp/](../mcp/).
-- [ ] Streamable HTTP transport (Tailscale serve/funnel + auth) → Claude-app custom connector;
-      test whether the iOS app's voice mode can call it.
+- [x] Streamable HTTP transport (`--http` + Tailscale Funnel, token-in-path auth) → registered
+      as a claude.ai custom connector. **Confirmed 2026-07: the Claude iOS app's voice mode
+      can call the tools** — continuous voice conversation with plan→execute gating is real.
+      (Hardening next: LaunchAgent so the server survives reboots; OAuth instead of the
+      bearer URL.)
 - [ ] Compose provider MCP servers instead of bespoke CLI glue.
 - [ ] Invite registrars/hosts (NameSilo, Bluehost, Porkbun, DO, Cloudflare…) to publish skills;
       shipmate becomes the orchestration + safety layer on top, not the integration grind.
