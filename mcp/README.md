@@ -45,6 +45,17 @@ OAuth are the production path — this is the experiment path.
 | `shipmate_counsel` | deliberate on a question (single model, or multi-model panel + dissent when the toggle is on) | read-only always |
 | `shipmate_counsel_toggle` | counsel on/off (off = single Anthropic model, the default) | — |
 
+## Keep it running (LaunchAgents)
+
+```bash
+bash mcp/install-launchagents.sh        # idempotent; --remove to undo
+```
+
+Installs user LaunchAgents for both servers (`--http 8788`, `--onboard 8790`): started at
+login, restarted on crash, logs in `~/.shipmate/mcp/`. The funnel config persists on its own.
+LaunchAgents start at *login* — for a host that must survive a power cut unattended, enable
+automatic login (macOS disables that while FileVault is on).
+
 ## Onboarding new devices (`--onboard`)
 
 ```bash
