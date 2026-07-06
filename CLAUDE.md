@@ -42,13 +42,15 @@ inject env safely), **url** (the live URL), **allowlist/auth** (wire the app's s
 
 ## Map
 - `skills/deploy/SKILL.md` — the agent runbook (multi-provider, safety, DNS, post-deploy)
-- `skills/deploy/bin/` — `doctor.sh`, `do-provision.sh`, `supabase-allowlist.sh`
+- `skills/deploy/bin/` — `doctor.sh`, `do-provision.sh`, `do-app.sh`, `vercel-provision.sh`,
+  `supabase-allowlist.sh`
 - `skills/deploy/lib/envspec.sh` — the tested, security-critical env classifier
-- `tests/` — run `bash tests/test_envspec.sh` · `voice/` — the voice bridge · `docs/` — vision/secrets/roadmap
+- `tests/` — run every `tests/test_*.sh` · `voice/` — the voice bridge (bridge + tested phrase
+  parser in `voice/lib/`) · `docs/` — vision/secrets/roadmap
 - `install.sh` — link skills into `~/.claude/skills` + enable the secret hook
 
 ## Before you commit
-- [ ] `bash tests/test_envspec.sh` green
+- [ ] every `tests/test_*.sh` green (env classifier + voice phrase parser)
 - [ ] `bash skills/deploy/bin/doctor.sh` sane on your machine
 - [ ] no secret value in any committed file (the pre-commit hook enforces this)
 - [ ] no hardcoded usernames/refs — derived from context

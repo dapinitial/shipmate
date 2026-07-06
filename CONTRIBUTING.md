@@ -11,7 +11,8 @@ bash skills/deploy/bin/doctor.sh            # check your tools + auth
 ```
 
 ## Before every commit
-- `bash tests/test_envspec.sh` — **green** (the env classifier is security-critical).
+- Every `tests/test_*.sh` — **green** (the env classifier and the voice phrase parser both
+  guard against shipping the wrong thing).
 - `bash skills/deploy/bin/doctor.sh` — sane on your machine.
 - No secret value in any committed file (the pre-commit hook enforces it).
 - No hardcoded usernames/refs — derive from context (`gh`/git remote, `.env.local`, `.shiprc`).

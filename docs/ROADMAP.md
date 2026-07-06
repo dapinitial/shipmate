@@ -3,14 +3,16 @@
 The arc: a single deploy skill → a provider-agnostic ops assistant → voice → an ecosystem where
 providers ship their own agent-callable skills and shipmate composes them.
 
-## Phase 1 — Deploy, one provider (now)
+## Phase 1 — Deploy, one provider
 - [x] DigitalOcean App Platform deploy skill (`/deploy`), stack-aware (Next.js, Astro SSR).
 - [x] DNS modes documented; safety/confirmation model.
-- [ ] Dogfood end-to-end on a real fleet; capture the rough edges.
+- [x] Dogfood end-to-end on a real fleet; capture the rough edges. (The first voice-driven
+      production ship — a feature built by a background agent, reviewed, then merged and
+      deployed by voice — landed 2026-07.)
 
 ## Phase 2 — Choose your destiny (multi-provider)
-- [ ] `/deploy` asks (or detects) the target: **DigitalOcean** or **Vercel**.
-- [ ] Vercel path: `vercel` CLI / API, env sync, preview deploys.
+- [x] `/deploy` asks (or detects) the target: **DigitalOcean** or **Vercel**.
+- [x] Vercel path: `vercel` CLI / API, env sync, preview deploys. (beta)
 - [ ] **DNS automation** — when the domain is on provider DNS, create subdomain + cert hands-off.
 - [ ] One-time **DNS migration helper** (registrar → DO/Cloudflare) with a record-replication
       checklist so nothing breaks.
@@ -18,12 +20,14 @@ providers ship their own agent-callable skills and shipmate composes them.
 ## Phase 3 — Voice
 The brain (an LLM running CLIs/APIs) already exists — voice is a thin, easy front-end. The value
 is the orchestration + safety underneath, not the wake word.
-- [ ] **Apple Shortcut**: "Hey Siri, tell shipmate to deploy panogram" → calls a local/remote
-      endpoint that runs the skill, reads back the plan, and asks for confirmation before anything
-      bills.
+- [x] **Apple Shortcut**: "Hey Siri, shipmate…" → SSH into your own Mac, conversational
+      sessions (`--resume`), background agent jobs, push-back via ntfy → CarPlay. Plan mode is
+      code-enforced (`--permission-mode plan`); execute needs a trailing "confirm"/"ship it".
+      See [voice/](../voice/).
 - [ ] **Alexa Skill** equivalent.
 - [ ] Confirmation-by-voice for *reversible* actions only; irreversible/billable steps require an
-      explicit out-of-band confirm (a tap, not a "yeah sure").
+      explicit out-of-band confirm (a tap, not a "yeah sure") — ntfy action buttons are the
+      natural carrier.
 
 ## Phase 4 — Ecosystem (MCP)
 The industry is heading toward providers exposing agent-callable tools (**MCP** —
