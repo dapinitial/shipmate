@@ -90,6 +90,7 @@ ask for *"status"*.
 - [x] Multi-turn sessions (`--resume`), background jobs, push-back channel.
 - [ ] Out-of-band confirm for billable steps (a phone tap, not just a spoken word) — the ntfy
       channel is the natural carrier for this.
-- [ ] `shipmate-mcp`: expose plan/confirm/status/jobs as MCP tools so the Claude iOS app
-      (voice mode) and other clients can drive the same engine. See docs/ROADMAP.md Phase 4.
+- [x] `shipmate-mcp` v0: plan/execute/status/jobs as MCP tools over this same engine, with
+      the plan→confirm gate enforced in code. See [mcp/](../mcp/). (HTTP transport for the
+      Claude apps: next.)
 - [ ] Alexa Skill equivalent (same bridge, different front-end).

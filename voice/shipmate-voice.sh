@@ -47,6 +47,11 @@ Verbs it hears (case/punctuation don't matter):
   stop [job N]                stop a running job
   new session                 forget the current conversation
 
+Machine interface (no phrase parsing — used by mcp/shipmate-mcp.js):
+  --turn <plan|execute> <project|-> <request…>    one conversational turn
+  --dispatch <project|-> <task…>                  start a background job
+  --status-report | --result [N] | --stop [N]     job management
+
 Environment (put exports in ~/.shipmate/voice.env):
   SHIPMATE_SITES_ROOT    where projects live (default ~/Sites)
   SHIPMATE_PROJECT_DIR   default project when the phrase names none (default: sites root)
@@ -253,17 +258,38 @@ verb_stop() { # <normalized phrase>
 
 case "${1:-}" in
   -h|--help) usage; exit 0 ;;
-  --job-runner) job_runner "$2"; exit 0 ;;
+  --job-runner) mkdir -p "$JOBS_DIR"; job_runner "$2"; exit 0 ;;
+esac
+
+if ! command -v claude >/dev/null 2>&1; then
+  speak "The claude command line isn't available on the Mac, so I can't help from here."; exit 1
+fi
+mkdir -p "$JOBS_DIR"
+
+# Machine interface — same engine without phrase parsing, for shipmate-mcp and scripts.
+#   --turn <plan|execute> <project|-> <request…>   one conversational turn
+#   --dispatch <project|-> <task…>                 start a background job
+#   --status-report · --result [N] · --stop [N]    job management
+case "${1:-}" in
+  --turn)
+    MODE="$2"
+    if [ "$MODE" != "plan" ] && [ "$MODE" != "execute" ]; then
+      speak "usage: --turn <plan|execute> <project|-> <request…>"; exit 1
+    fi
+    PROJ="$(project_or_default "$(resolve_project "$(phrase_normalize "$3")")")"
+    shift 3; turn "$*" "$MODE" "$PROJ"; exit $? ;;
+  --dispatch)
+    PROJ="$(project_or_default "$(resolve_project "$(phrase_normalize "$2")")")"
+    shift 2; dispatch_job "$*" "$PROJ"; exit 0 ;;
+  --status-report) verb_status; exit 0 ;;
+  --result)        verb_result "job ${2:-}"; exit 0 ;;
+  --stop)          verb_stop "job ${2:-}"; exit 0 ;;
 esac
 
 PHRASE="${*:-}"
 # No argument? Read stdin — Shortcuts' "Run Script Over SSH" passes its Input that way.
 if [ -z "$PHRASE" ] && [ ! -t 0 ]; then PHRASE="$(cat)"; fi
 if [ -z "$PHRASE" ]; then speak "shipmate: tell me what to ship."; exit 1; fi
-if ! command -v claude >/dev/null 2>&1; then
-  speak "The claude command line isn't available on the Mac, so I can't help from here."; exit 1
-fi
-mkdir -p "$JOBS_DIR"
 
 NORM="$(phrase_normalize "$PHRASE")"
 MODE="$(phrase_mode "$NORM")"

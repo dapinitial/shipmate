@@ -1,0 +1,47 @@
+# shipmate-mcp (v0 — stdio)
+
+The shipmate engine as **MCP tools**, so any MCP client — Claude Code, and eventually the
+Claude apps through a remote connector — can drive deploys and background agent jobs. Voice
+(the Siri bridge) and MCP are two mouths on the same tested engine: both call
+`voice/shipmate-voice.sh`.
+
+Zero dependencies: plain Node, JSON-RPC 2.0 over stdio.
+
+## Register (local, Claude Code)
+
+```bash
+claude mcp add --scope user shipmate -- node ~/Sites/shipmate/mcp/shipmate-mcp.js
+```
+
+Then from any session: "use shipmate_plan to see what deploying this would cost."
+
+## Tools
+
+| Tool | Does | Safety |
+|---|---|---|
+| `shipmate_plan` | describe what a request would do + exact cost | read-only, code-enforced (`--permission-mode plan`) |
+| `shipmate_execute` | act on the planned request | **structurally gated** — see below |
+| `shipmate_status` | background jobs: running/done/failed | read-only |
+| `shipmate_task_start` | background agent job (build/test) | branch-only, never deploys, never bills |
+| `shipmate_task_result` | a finished job's summary | read-only |
+| `shipmate_task_stop` | stop a running job | — |
+
+## The two-phase gate (the point of this server)
+
+`shipmate_execute` is refused **in code** unless `shipmate_plan` ran for the **same project**
+within the **last 10 minutes**, and the grant is **single-use** — consumed on execute. In the
+voice bridge, plan→confirm is a convention the prompt upholds; here it's a mechanism the
+client cannot skip. A model that never planned *cannot* execute, no matter what it says.
+
+Execute turns still carry the doctrine: cost-neutral steps (merge, build, push, redeploy)
+proceed; creating new billed resources, resizing, or deleting stops and describes itself.
+
+## Roadmap (Phase 4 of docs/ROADMAP.md)
+
+- [x] v0: stdio server over the bridge's machine interface; two-phase plan/execute in code.
+- [ ] Streamable HTTP transport behind Tailscale (serve/funnel) + bearer auth, so the Claude
+      apps can reach it as a custom connector.
+- [ ] Test the Claude iOS app's **voice mode** against the connector — if voice mode can call
+      MCP tools, the phone app becomes the conversational front-end (the Siri bridge stays as
+      the fallback).
+- [ ] Out-of-band confirm for billable steps: ntfy action buttons hitting a local callback.

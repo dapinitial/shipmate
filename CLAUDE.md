@@ -46,7 +46,8 @@ inject env safely), **url** (the live URL), **allowlist/auth** (wire the app's s
   `supabase-allowlist.sh`
 - `skills/deploy/lib/envspec.sh` — the tested, security-critical env classifier
 - `tests/` — run every `tests/test_*.sh` · `voice/` — the voice bridge (bridge + tested phrase
-  parser in `voice/lib/`) · `docs/` — vision/secrets/roadmap
+  parser in `voice/lib/`) · `mcp/` — the MCP server over the same engine · `docs/` —
+  vision/secrets/roadmap
 - `install.sh` — link skills into `~/.claude/skills` + enable the secret hook
 
 ## Before you commit
