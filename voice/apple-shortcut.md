@@ -15,11 +15,12 @@ the default; end a phrase with **"confirm"** (or "do it") to actually execute.
 2. Add **Dictate Text** → captures what you say after "shipmate".
 3. Add **Run Script Over SSH**:
    - **Host** = Mac IP / hostname, **User** = your username, **Authentication** = the SSH key.
-   - **Script**:
+   - **Input** = the *Dictated Text* variable (the bridge reads it from stdin), **Script**:
      ```
-     bash ~/Sites/shipmate/voice/shipmate-voice.sh "[Dictated Text]"
+     bash ~/Sites/shipmate/voice/shipmate-voice.sh
      ```
-     (insert the *Dictated Text* variable where shown)
+   - (Equivalent alternative: leave Input empty and put the variable in the script line
+     itself: `bash ~/Sites/shipmate/voice/shipmate-voice.sh "[Dictated Text]"`.)
 4. Add **Speak Text** → input = the **Shell Script Result**.
 
 Sessions persist on the Mac, so even one-shot invocations chain: run it again and say

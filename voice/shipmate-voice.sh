@@ -111,7 +111,7 @@ project_or_default() {
 
 turn() { # <phrase> <mode:plan|execute> <project dir>
   local phrase="$1" mode="$2" project="$3"
-  local sid="" old_project="" perm prompt out result new_sid
+  local sid="" old_project="" perm prompt out result new_sid err exec_tools=""
   if [ -f "$STATE_DIR/session.id" ]; then sid="$(cat "$STATE_DIR/session.id")"; fi
   if [ -f "$STATE_DIR/session.project" ]; then old_project="$(cat "$STATE_DIR/session.project")"; fi
   # A different project means a different cwd — start a fresh session there.
@@ -120,18 +120,25 @@ turn() { # <phrase> <mode:plan|execute> <project dir>
 
   if [ "$mode" = "execute" ]; then
     perm="acceptEdits"
-    prompt="Spoken request (hands-free driver; reply short enough to read aloud, plain prose, no markdown): \"$phrase\". Mode=EXECUTE: proceed, but for any step that is irreversible or increases cost, stop and describe it instead — it needs an on-screen confirm later."
+    # Execute turns may drive the deploy toolchain non-interactively; everything else
+    # still needs on-screen approval. Override the list via SHIPMATE_VOICE_EXECUTE_TOOLS.
+    exec_tools="${SHIPMATE_VOICE_EXECUTE_TOOLS:-Bash(git:*),Bash(npm:*),Bash(doctl:*),Bash(vercel:*),Bash(gh:*)}"
+    prompt="Spoken request (hands-free driver; reply short enough to read aloud, plain prose, no markdown): \"$phrase\". Mode=EXECUTE: the user has explicitly confirmed — act now, don't re-ask. Cost-neutral steps (git merge, build, push, redeploying an existing app) proceed without hesitation; always state the monthly cost in your reply. Stop and describe instead ONLY for: creating new billed resources, raising cost (resize, scale), or deleting resources or user data."
   else
     perm="plan"
     prompt="Spoken request (hands-free driver; reply short enough to read aloud, plain prose, no markdown): \"$phrase\". Mode=PLAN: say what you would do and the exact monthly cost. Create, change, charge, or publish NOTHING."
   fi
   if [ -z "$sid" ]; then
-    prompt="You are shipmate, a voice deploy assistant for this project. Use the /deploy skill for deploy, DNS, and provider work. $prompt"
+    prompt="You are shipmate, a voice deploy assistant for this project. Use the /deploy skill for deploy, DNS, and provider work. The bridge switches to execute ONLY when the user's phrase ends with 'confirm', 'do it', 'send it', or 'ship it' — when telling the user how to proceed, quote one of those exactly; never invent another trigger word. $prompt"
   fi
 
   if ! out="$(claude -p --output-format json --permission-mode "$perm" \
+      ${exec_tools:+--allowedTools "$exec_tools"} \
       ${sid:+--resume "$sid"} ${SHIPMATE_VOICE_CLAUDE_ARGS:-} "$prompt" 2>"$STATE_DIR/last-turn.err")"; then
-    speak "shipmate hit an error talking to Claude: $(tail -n1 "$STATE_DIR/last-turn.err" 2>/dev/null | clip 200)"
+    # claude reports some failures on stdout (json) rather than stderr — keep both.
+    printf '%s' "$out" > "$STATE_DIR/last-turn.out"
+    err="$( { tail -n1 "$STATE_DIR/last-turn.err"; printf '%s' "$out" | json_get result; printf '%s' "$out"; } 2>/dev/null | awk 'NF {print; exit}' )"
+    speak "shipmate hit an error talking to Claude: $(printf '%s' "${err:-no detail — check last-turn.err and last-turn.out on the Mac}" | clip 200)"
     return 1
   fi
   result="$(printf '%s' "$out" | json_get result)"
@@ -250,6 +257,8 @@ case "${1:-}" in
 esac
 
 PHRASE="${*:-}"
+# No argument? Read stdin — Shortcuts' "Run Script Over SSH" passes its Input that way.
+if [ -z "$PHRASE" ] && [ ! -t 0 ]; then PHRASE="$(cat)"; fi
 if [ -z "$PHRASE" ]; then speak "shipmate: tell me what to ship."; exit 1; fi
 if ! command -v claude >/dev/null 2>&1; then
   speak "The claude command line isn't available on the Mac, so I can't help from here."; exit 1

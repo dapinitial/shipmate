@@ -44,6 +44,9 @@ there's no diff to review. So:
 - **Plan turns are read-only in code, not prose:** they run with Claude Code's
   `--permission-mode plan`, so a plan turn *cannot* write, run, or bill — no matter what the
   model or a misheard phrase says.
+- **Execute turns get exactly the deploy toolchain** (`--allowedTools` for git, npm, doctl,
+  vercel, gh — override with `SHIPMATE_VOICE_EXECUTE_TOOLS`); anything outside that list
+  still requires on-screen approval, which a voice session can't give.
 - **Explicit execute.** Only a phrase **ending** in "confirm" / "do it" / "send it" /
   "ship it" executes — a deliberate second utterance, not an accidental "yeah". A "confirm"
   mid-sentence doesn't count. Even then, irreversible/billable steps still pause.
@@ -77,6 +80,8 @@ ask for *"status"*.
 | `SHIPMATE_NTFY_TOPIC` | *(unset)* | ntfy topic for pushes |
 | `SHIPMATE_NTFY_URL` | `https://ntfy.sh` | ntfy server |
 | `SHIPMATE_VOICE_CLAUDE_ARGS` | *(unset)* | extra flags for every `claude` call |
+| `SHIPMATE_VOICE_EXECUTE_TOOLS` | git/npm/doctl/vercel/gh | `--allowedTools` list for **execute** turns only |
+| `CLAUDE_CODE_OAUTH_TOKEN` | *(unset)* | from `claude setup-token` — **required over SSH** (the macOS Keychain isn't readable in SSH sessions) |
 
 ## Status / hardening TODO
 
