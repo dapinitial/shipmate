@@ -43,7 +43,7 @@ inject env safely), **url** (the live URL), **allowlist/auth** (wire the app's s
 ## Map
 - `skills/deploy/SKILL.md` — the agent runbook (multi-provider, safety, DNS, post-deploy)
 - `skills/deploy/bin/` — `doctor.sh`, `do-provision.sh`, `do-app.sh`, `vercel-provision.sh`,
-  `supabase-allowlist.sh`
+  `supabase-allowlist.sh`, `request-approval.sh` (tap-to-confirm for new spend)
 - `skills/deploy/lib/envspec.sh` — the tested, security-critical env classifier
 - `tests/` — run every `tests/test_*.sh` · `voice/` — the voice bridge (bridge + tested phrase
   parser in `voice/lib/`) · `mcp/` — the MCP server over the same engine · `docs/` —

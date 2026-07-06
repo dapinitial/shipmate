@@ -25,9 +25,9 @@ is the orchestration + safety underneath, not the wake word.
       code-enforced (`--permission-mode plan`); execute needs a trailing "confirm"/"ship it".
       See [voice/](../voice/).
 - [ ] **Alexa Skill** equivalent.
-- [ ] Confirmation-by-voice for *reversible* actions only; irreversible/billable steps require an
-      explicit out-of-band confirm (a tap, not a "yeah sure") — ntfy action buttons are the
-      natural carrier.
+- [x] Confirmation-by-voice for *reversible* actions only; billable steps require an explicit
+      out-of-band confirm: `request-approval.sh` pushes ntfy **Approve/Deny buttons** that hit
+      the tailnet-only server — a tap from your own device, not a "yeah sure". Fails closed.
 
 ## Phase 4 — Ecosystem (MCP)
 The industry is heading toward providers exposing agent-callable tools (**MCP** —

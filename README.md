@@ -59,6 +59,12 @@ where you can hand agents your infrastructure and sleep.
 - Has a **safety model**: it shows the plan *and the cost* and waits for your explicit yes before
   anything bills or goes live. Voice is a lovely demo and a terrible UI for irreversible infra — so
   confirmation is built in, not bolted on.
+- **Speaks and listens**: Siri/CarPlay one-shots, or a continuous Claude-app voice conversation
+  (via [MCP](mcp/)) — background agents build on jailed branches, push results to your phone, and
+  wait for your go. New spend needs a **tap on a notification** (from your own tailnet), not a
+  "yeah". *"Roll back panogram, confirm"* reverts a bad deploy with no model in the loop.
+- **Deliberates on demand**: `counsel on` convenes a multi-model panel that must report its
+  dissent; off (default), the single best Anthropic model answers.
 
 ## Install
 
