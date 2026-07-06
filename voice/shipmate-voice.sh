@@ -42,6 +42,10 @@ Verbs it hears (case/punctuation don't matter):
   <any follow-up>             continues the current conversation
   work on <task>              background agent job (also: "have an agent ...",
                               "... in the background"); replies immediately
+  counsel <question>          deliberate (read-only). Toggle OFF (default): the single
+                              default Anthropic model answers. Toggle ON: fans out to
+                              SHIPMATE_COUNSEL_MODELS in parallel + a chair synthesis
+                              that must name the dissent. "counsel on" / "counsel off".
   status                      running/finished jobs
   result [job N]              speak a job's summary
   stop [job N]                stop a running job
@@ -51,6 +55,8 @@ Machine interface (no phrase parsing — used by mcp/shipmate-mcp.js):
   --turn <plan|execute> <project|-> <request…>    one conversational turn
   --dispatch <project|-> <task…>                  start a background job
   --status-report | --result [N] | --stop [N]     job management
+  --counsel <project|-> <question…>               deliberate (respects the toggle)
+  --counsel-set <on|off>                          flip the counsel toggle
 
 Environment (put exports in ~/.shipmate/voice.env):
   SHIPMATE_SITES_ROOT    where projects live (default ~/Sites)
@@ -154,6 +160,72 @@ turn() { # <phrase> <mode:plan|execute> <project dir>
   fi
   if [ -n "$result" ]; then printf '%s' "$result" | clip 1500
   else speak "Done, but Claude returned no summary. Check the Mac."; fi
+}
+
+# ---- counsel: multi-model deliberation (toggle, default OFF) ------------------------------
+# OFF (default): counsel questions go to the single default Anthropic model — fast, cheap,
+# and usually all you need. ON: the question fans out to SHIPMATE_COUNSEL_MODELS in parallel
+# and a chair synthesizes, REQUIRED to name where the panel disagreed. Always read-only.
+
+counsel_enabled() {
+  if [ -n "${SHIPMATE_COUNSEL:-}" ]; then [ "$SHIPMATE_COUNSEL" = "on" ]; return $?; fi
+  [ "$(cat "$STATE_DIR/counsel" 2>/dev/null)" = "on" ]
+}
+
+counsel_toggle() { # on|off
+  printf '%s' "$1" > "$STATE_DIR/counsel"
+  if [ "$1" = "on" ]; then
+    speak "Counsel enabled — deliberations now convene ${SHIPMATE_COUNSEL_MODELS:-claude-fable-5 claude-opus-4-8 claude-sonnet-5} and report their dissent. Say counsel off to return to a single model."
+  else
+    speak "Counsel off — back to the single default Anthropic model."
+  fi
+}
+
+model_label() { printf '%s' "$1" | awk -F- '{print $2}'; }
+
+counsel() { # <question> <project dir>
+  local q="$1" project="$2"
+  if [ -z "$q" ]; then speak "What should the counsel deliberate on?"; return 1; fi
+  if ! counsel_enabled; then turn "$q" plan "$project"; return $?; fi
+
+  local models="${SHIPMATE_COUNSEL_MODELS:-claude-fable-5 claude-opus-4-8 claude-sonnet-5}"
+  local tmp m n=0 answers="" chair=""
+  tmp="$(mktemp -d "${TMPDIR:-/tmp}/shipmate-counsel.XXXXXX")"
+  cd "$project"
+
+  for m in $models; do
+    claude -p --model "$m" --permission-mode plan \
+      "You are one independent voice on a technical counsel for the project in this directory. Question: \"$q\". Give YOUR OWN opinionated recommendation in under 120 words: position, strongest reason, biggest risk. Plain prose." \
+      > "$tmp/$m.txt" 2>"$tmp/$m.err" &
+  done
+  wait
+
+  for m in $models; do
+    if [ -s "$tmp/$m.txt" ]; then
+      n=$((n + 1))
+      answers="$answers
+
+--- $(model_label "$m") says:
+$(cat "$tmp/$m.txt")"
+    fi
+  done
+  if [ "$n" -eq 0 ]; then
+    cat "$tmp"/*.err > "$STATE_DIR/last-counsel.err" 2>/dev/null || true
+    rm -rf "$tmp"
+    speak "The counsel failed to convene — no model answered. Check last-counsel dot err on the Mac."
+    return 1
+  fi
+
+  chair="$(claude -p --permission-mode plan \
+    "You chair a technical counsel. $n members answered the question \"$q\" below. Synthesize for a hands-free listener in under 150 words of plain prose: the verdict, where members AGREE, and — required — where they DISAGREE, naming who dissents and why. End with the single next step.$answers" \
+    2>>"$STATE_DIR/last-counsel.err")" || chair=""
+
+  { printf 'QUESTION: %s\n' "$q"; printf '%s\n' "$answers"; printf '\n=== CHAIR ===\n%s\n' "$chair"; } \
+    > "$STATE_DIR/last-counsel.txt"
+  rm -rf "$tmp"
+
+  if [ -n "$chair" ]; then printf '%s' "$chair" | clip 1500
+  else speak "The counsel answered but the chair failed to synthesize. $n opinions are in last-counsel dot t x t on the Mac."; fi
 }
 
 # ---- background jobs ---------------------------------------------------------------------
@@ -284,6 +356,12 @@ case "${1:-}" in
   --status-report) verb_status; exit 0 ;;
   --result)        verb_result "job ${2:-}"; exit 0 ;;
   --stop)          verb_stop "job ${2:-}"; exit 0 ;;
+  --counsel)
+    PROJ="$(project_or_default "$(resolve_project "$(phrase_normalize "$2")")")"
+    shift 2; counsel "$*" "$PROJ"; exit $? ;;
+  --counsel-set)
+    case "${2:-}" in on|off) counsel_toggle "$2"; exit 0 ;; esac
+    speak "usage: --counsel-set <on|off>"; exit 1 ;;
 esac
 
 PHRASE="${*:-}"
@@ -303,6 +381,9 @@ case "$VERB" in
   status) verb_status ;;
   result) verb_result "$CLEAN" ;;
   stop)   verb_stop "$CLEAN" ;;
+  counsel_on)  counsel_toggle on ;;
+  counsel_off) counsel_toggle off ;;
+  counsel) counsel "$(phrase_counsel_question "$CLEAN")" "$(project_or_default "$(resolve_project "$CLEAN")")" ;;
   job)    dispatch_job "$(phrase_task "$CLEAN")" "$(project_or_default "$(resolve_project "$CLEAN")")" ;;
   say)    turn "$CLEAN" "$MODE" "$(project_or_default "$(resolve_project "$CLEAN")")" ;;
 esac

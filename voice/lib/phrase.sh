@@ -33,8 +33,10 @@ phrase_strip_confirm() {
 #   result  — "result …", "read job …", "what happened …"
 #   stop    — "stop/cancel/kill …"
 #   new     — "new session/conversation", "start over", "reset"
-#   job     — background work: "work on …", "have an agent …", "… in the background"
-#   say     — everything else: a conversational turn for the live session
+#   job         — background work: "work on …", "have an agent …", "… in the background"
+#   counsel_on / counsel_off — flip multi-model deliberation ("counsel on", "counsel off")
+#   counsel     — a deliberation question: "counsel …", "deliberate …", "convene the counsel …"
+#   say         — everything else: a conversational turn for the live session
 phrase_verb() {
   local p="${1:-}"
   case "$p" in
@@ -46,10 +48,23 @@ phrase_verb() {
       echo stop; return ;;
     new\ session*|new\ conversation*|start\ over*|reset|reset\ *|fresh\ session*)
       echo new; return ;;
+    counsel\ on|deliberate\ on|enable\ the\ counsel)
+      echo counsel_on; return ;;
+    counsel\ off|deliberate\ off|disable\ the\ counsel)
+      echo counsel_off; return ;;
+    counsel\ *|deliberate\ *|convene\ the\ counsel*|ask\ the\ counsel*)
+      echo counsel; return ;;
     work\ on\ *|have\ an\ agent*|start\ a\ job*|*\ in\ the\ background)
       echo job; return ;;
   esac
   echo say
+}
+
+# phrase_counsel_question <normalized> — the question minus its counsel trigger words:
+# "counsel on whether we should move to vercel" → "whether we should move to vercel".
+phrase_counsel_question() {
+  printf '%s' "${1:-}" \
+    | sed -E 's/^(convene the counsel|ask the counsel|counsel|deliberate)( on| about|:)? ?//'
 }
 
 # phrase_job_id <normalized> — first job number in the phrase ("stop job 3" → 3,

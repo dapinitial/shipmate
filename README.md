@@ -21,6 +21,34 @@ Every new project, you redo the same manual ritual. shipmate is the brain that d
 and, crucially, it **knows where the gaps are**. It tells you the one thing a provider won't let it
 automate instead of pretending it can.
 
+## Design — why this isn't vibe coding
+
+shipmate separates **brains from authority**. Agents can read state, plan work, and build on
+throwaway branches with zero credentials; nothing reaches production except through one gate.
+The interesting problem was never getting an LLM to run `doctl` — it's an authority model
+where you can hand agents your infrastructure and sleep.
+
+- **Authority is structural, not conversational.** Executing requires a fresh **single-use
+  grant** minted by a plan step (10-minute TTL, enforced in code). An agent that never
+  planned *cannot* execute — no prompt injection, mishearing, or hallucination changes that.
+- **Read-only means enforced read-only** — plan turns run under Claude Code's
+  `--permission-mode plan`, not under "please don't write anything."
+- **Workers are untrusted by design.** Background agents get a fresh branch, no deploy
+  credentials, and can't touch the default branch. Their output is *proposals*; merge and
+  deploy pass back through the gate.
+- **Thin clients, one engine.** Siri/SSH, the Claude app's voice mode (via [MCP](mcp/)), and
+  the terminal are interchangeable mouths on the same tested core — adding a front-end adds
+  **zero new authority**.
+- **Tests where bugs are catastrophic.** The env secret-classifier and the parser that
+  decides plan-vs-execute are the two places a bug ships a plaintext secret or executes a
+  misheard command; both have suites (`tests/`).
+- **Deliberation is a toggle, not a lifestyle.** `counsel off` (default): the single default
+  Anthropic model answers — fast, and frankly the best. `counsel on`: questions fan out to a
+  multi-model panel in parallel and a chair synthesizes, *required to name the dissent*.
+  Always read-only either way.
+- **Honest gaps over false magic.** No provider API → shipmate says so and hands you the one
+  manual step.
+
 ## What it does today
 
 - **Deploys** the current project to **DigitalOcean App Platform** (GitHub deploy-on-push).

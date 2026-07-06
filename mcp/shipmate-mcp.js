@@ -137,6 +137,30 @@ const TOOLS = [
       properties: { job_id: { type: 'integer', description: 'Job number to stop' } },
     },
   },
+  {
+    name: 'shipmate_counsel',
+    description: 'Deliberate on a technical/infra question — always read-only, never acts. ' +
+      'With the counsel toggle OFF (default) the single default Anthropic model answers. ' +
+      'With it ON, the question fans out to several models in parallel and a chair ' +
+      'synthesizes, naming where the panel disagrees.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        question: { type: 'string', description: 'The question to deliberate on' },
+        project: { type: 'string', description: 'Project name for context (default: current session project)' },
+      },
+      required: ['question'],
+    },
+  },
+  {
+    name: 'shipmate_counsel_toggle',
+    description: 'Turn multi-model counsel deliberation on or off (off = single Anthropic model, the default).',
+    inputSchema: {
+      type: 'object',
+      properties: { enabled: { type: 'boolean', description: 'true = counsel on, false = off' } },
+      required: ['enabled'],
+    },
+  },
 ];
 
 async function callTool(name, args) {
@@ -164,6 +188,10 @@ async function callTool(name, args) {
       return wrap(await bridge(['--result', ...(a.job_id != null ? [String(a.job_id)] : [])]));
     case 'shipmate_task_stop':
       return wrap(await bridge(['--stop', ...(a.job_id != null ? [String(a.job_id)] : [])]));
+    case 'shipmate_counsel':
+      return wrap(await bridge(['--counsel', proj, a.question]));
+    case 'shipmate_counsel_toggle':
+      return wrap(await bridge(['--counsel-set', a.enabled ? 'on' : 'off']));
     default:
       throw Object.assign(new Error(`unknown tool: ${name}`), { code: -32602 });
   }

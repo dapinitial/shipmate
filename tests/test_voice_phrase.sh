@@ -49,6 +49,17 @@ ok "in the background"   "$(phrase_verb 'add tests to panogram in the background
 ok "deploy = say"        "$(phrase_verb 'deploy panogram')"                           say
 ok "question = say"      "$(phrase_verb 'what will that cost per month')"             say
 ok "stopword not stop"   "$(phrase_verb 'deploy the stopwatch app')"                  say
+ok "counsel on (exact)"  "$(phrase_verb 'counsel on')"                                counsel_on
+ok "counsel off (exact)" "$(phrase_verb 'counsel off')"                               counsel_off
+ok "counsel question"    "$(phrase_verb 'counsel on whether to move to vercel')"      counsel
+ok "deliberate question" "$(phrase_verb 'deliberate about the dns migration')"        counsel
+ok "convene the counsel" "$(phrase_verb 'convene the counsel should we resize')"      counsel
+
+echo "counsel question extraction:"
+ok "strips counsel on"      "$(phrase_counsel_question 'counsel on whether to move to vercel')" "whether to move to vercel"
+ok "strips convene"         "$(phrase_counsel_question 'convene the counsel should we resize')" "should we resize"
+ok "strips ask the counsel" "$(phrase_counsel_question 'ask the counsel about caching')"        "caching"
+ok "strips deliberate"      "$(phrase_counsel_question 'deliberate about the dns migration')"   "the dns migration"
 
 echo "job id extraction:"
 ok "digits"        "$(phrase_job_id 'stop job 3')"          3

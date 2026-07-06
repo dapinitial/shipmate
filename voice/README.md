@@ -28,6 +28,8 @@ by hand. Setup in **[apple-shortcut.md](apple-shortcut.md)**.
 | *"what will that cost?"* (any follow-up) | Continues the **same session** — it remembers the plan. |
 | *"…confirm"* / *"do it"* / *"send it"* / *"ship it"* | Executes the plan (still pauses on irreversible steps). |
 | *"work on adding dark mode to panogram"* | **Background agent job.** Replies in 2 seconds, works for as long as it takes, pings your phone when done. Also: *"have an agent …"*, *"… in the background"*. |
+| *"counsel on whether we should move to Vercel"* | **Deliberate** (read-only, never acts). Toggle off (default): the default Anthropic model answers. Toggle on: a multi-model panel answers in parallel and a chair synthesizes, naming the dissent. Full transcript lands in `~/.shipmate/voice/last-counsel.txt`. |
+| *"counsel on"* / *"counsel off"* | Flip the deliberation toggle. |
 | *"status"* / *"how's it going?"* | Which jobs are running/done, and for how long. |
 | *"result"* / *"what happened with job 2?"* | Speaks a finished job's summary. |
 | *"stop job 2"* | Kills a running job. |
@@ -81,6 +83,8 @@ ask for *"status"*.
 | `SHIPMATE_NTFY_URL` | `https://ntfy.sh` | ntfy server |
 | `SHIPMATE_VOICE_CLAUDE_ARGS` | *(unset)* | extra flags for every `claude` call |
 | `SHIPMATE_VOICE_EXECUTE_TOOLS` | git/npm/doctl/vercel/gh | `--allowedTools` list for **execute** turns only |
+| `SHIPMATE_COUNSEL` | *(unset)* | `on`/`off` overrides the voice-set toggle |
+| `SHIPMATE_COUNSEL_MODELS` | fable, opus, sonnet | space-separated model ids for the panel |
 | `CLAUDE_CODE_OAUTH_TOKEN` | *(unset)* | from `claude setup-token` — **required over SSH** (the macOS Keychain isn't readable in SSH sessions) |
 
 ## Status / hardening TODO
