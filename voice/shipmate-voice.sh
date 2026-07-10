@@ -49,6 +49,7 @@ Verbs it hears (case/punctuation don't matter):
   status                      running/finished jobs + live deploy phases
   roll back <project> [confirm]   describe, then revert the live deploy (deterministic)
   doctor | preflight          one spoken sentence of system health
+  log [to <project>] <entry>  captain's log: append verbatim + commit; "ship it" = push
   result [job N]              speak a job's summary
   stop [job N]                stop a running job
   new session                 forget the current conversation
@@ -102,17 +103,21 @@ notify() {
   fi
 }
 
-# resolve_project <normalized phrase> — a word in the phrase that names a dir under the
-# sites root wins (case-insensitive); empty when the phrase names nothing.
+# resolve_project <normalized phrase> — a word (or two adjacent words joined — dictation
+# writes "shotgun detour" for the dir shotgundetour) that names a dir under the sites root
+# wins (case-insensitive); empty when the phrase names nothing.
 resolve_project() {
-  local w d base
+  local w prev="" d base
   for w in $1; do
     for d in "$SITES_ROOT"/*/; do
       if [ -d "$d" ]; then
         base="$(basename "$d" | tr '[:upper:]' '[:lower:]')"
-        if [ "$base" = "$w" ]; then printf '%s' "${d%/}"; return 0; fi
+        if [ "$base" = "$w" ] || { [ -n "$prev" ] && [ "$base" = "$prev$w" ]; }; then
+          printf '%s' "${d%/}"; return 0
+        fi
       fi
     done
+    prev="$w"
   done
   printf ''
 }
@@ -308,6 +313,52 @@ flush_queue() { # replay queued intents FIFO once we're back online (results go 
     intent_run "$d"
     rm -rf "$d"
   done
+}
+
+# ---- captain's log: deterministic journal append (your words, your publish gate) -----------
+
+# verb_log <body-with-optional-"to <project>"-prefix> <mode>
+# Appends a timestamped entry to the project's captains-log.md and commits it. Plain log =
+# local commit only; a trailing "ship it"/"confirm" also pushes — which, on a deploy-on-push
+# repo, IS publishing. No model involved: these are the user's own words.
+verb_log() {
+  local body="$1" mode="$2" project="" rest="$1" w1 w2 file entry pname base
+  # Peel a leading "to <project>" (one or two dictated words) if it resolves.
+  if printf '%s' "$body" | grep -q '^to '; then
+    w1="$(printf '%s' "$body" | awk '{print $2}')"
+    w2="$(printf '%s' "$body" | awk '{print $3}')"
+    project="$(resolve_project "$w1 $w2")"
+    if [ -n "$project" ]; then
+      base="$(basename "$project" | tr '[:upper:]' '[:lower:]')"
+      if [ "$base" = "$w1$w2" ]; then rest="$(printf '%s' "$body" | cut -d' ' -f4-)"
+      else rest="$(printf '%s' "$body" | cut -d' ' -f3-)"; fi
+    fi
+  fi
+  if [ -z "$project" ]; then project="$(project_or_default "")"; fi
+  pname="$(basename "$project")"
+  if [ -z "$rest" ]; then speak "Log what?"; return 1; fi
+  if [ ! -d "$project" ]; then speak "I can't find the project directory for $pname."; return 1; fi
+
+  file="$project/${SHIPMATE_LOG_FILE:-captains-log.md}"
+  entry="- $(date '+%Y-%m-%d %H:%M') — $rest"
+  if [ ! -f "$file" ]; then printf '# Captain'\''s log\n\n' > "$file"; fi
+  printf '%s\n' "$entry" >> "$file"
+
+  if git -C "$project" rev-parse --git-dir >/dev/null 2>&1; then
+    git -C "$project" add "$(basename "$file")" 2>/dev/null || true
+    git -C "$project" commit -q -m "Log: $(printf '%s' "$rest" | cut -c1-60)" 2>/dev/null || true
+    if [ "$mode" = "execute" ]; then
+      if git -C "$project" push -q 2>/dev/null; then
+        speak "Logged to $pname and pushed — if it deploys on push, that entry is going live."
+      else
+        speak "Logged and committed to $pname, but the push failed — it's saved locally."
+      fi
+    else
+      speak "Logged to $pname. Committed locally — end with 'ship it' to publish."
+    fi
+  else
+    speak "Logged to $pname. Not a git repo, so it's just in the file."
+  fi
 }
 
 # ---- doctor: one spoken sentence of system health ------------------------------------------
@@ -514,6 +565,11 @@ case "${1:-}" in
     MODE="plan"; [ "${3:-}" = "--yes" ] && MODE="execute"
     verb_rollback "$PROJ" "$MODE"; exit $? ;;
   --doctor) verb_doctor; exit 0 ;;
+  --log)
+    PROJ="${2:-}"; shift 2
+    PUB="plan"; if [ "${1:-}" = "--publish" ]; then PUB="execute"; shift; fi
+    if [ "$PROJ" = "-" ]; then verb_log "$*" "$PUB"; else verb_log "to $PROJ $*" "$PUB"; fi
+    exit $? ;;
 esac
 
 # Opportunistic queue flush: any utterance while online drains the dead-zone backlog.
@@ -541,6 +597,7 @@ case "$VERB" in
   counsel_on)  counsel_toggle on ;;
   counsel_off) counsel_toggle off ;;
   doctor)   verb_doctor ;;
+  log)      verb_log "$(phrase_log_body "$CLEAN")" "$MODE" ;;
   rollback) verb_rollback "$(project_or_default "$(resolve_project "$CLEAN")")" "$MODE" ;;
   counsel) run_or_queue counsel "$MODE" "$(project_or_default "$(resolve_project "$CLEAN")")" "$(phrase_counsel_question "$CLEAN")" ;;
   job)    run_or_queue job "$MODE" "$(project_or_default "$(resolve_project "$CLEAN")")" "$(phrase_task "$CLEAN")" ;;

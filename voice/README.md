@@ -32,6 +32,7 @@ by hand. Setup in **[apple-shortcut.md](apple-shortcut.md)**.
 | *"counsel on"* / *"counsel off"* | Flip the deliberation toggle. |
 | *"status"* / *"how's it going?"* | Jobs (running/done) **and** each project's live production deploy phase. |
 | *"doctor"* / *"preflight"* | One spoken sentence: internet, tailnet, MCP server, DO auth, disk, jobs, queued intents. |
+| *"log [to \<project\>]: …"* | **Captain's log**: appends your words verbatim (timestamped) to the project's `captains-log.md` and commits — deterministic, no model. End with *"ship it"* to also push (deploy-on-push = published). |
 | *"roll back panogram"* → *"…confirm"* | Describe, then revert to the previous successful deployment — **deterministic** (no model in the loop), cost-neutral, DO for now. |
 | *"result"* / *"what happened with job 2?"* | Speaks a finished job's summary. |
 | *"stop job 2"* | Kills a running job. |

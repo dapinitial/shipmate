@@ -43,6 +43,7 @@ OAuth are the production path — this is the experiment path.
 | `shipmate_task_result` | a finished job's summary | read-only |
 | `shipmate_task_stop` | stop a running job | — |
 | `shipmate_doctor` | one-sentence health check (net, tailnet, servers, auth, disk, jobs, queue) | read-only, deterministic |
+| `shipmate_log` | timestamped captains-log entry, committed verbatim | deterministic; pushes only with `publish:true` |
 | `shipmate_rollback` | revert to the previous successful deployment (DO) | describe-only unless `confirm:true`; deterministic |
 | `shipmate_counsel` | deliberate on a question (single model, or multi-model panel + dissent when the toggle is on) | read-only always |
 | `shipmate_counsel_toggle` | counsel on/off (off = single Anthropic model, the default) | — |
@@ -78,6 +79,13 @@ joining your tailnet *is* the login. Tabs for each device type:
 
 All values are derived at startup (user, tailnet name, repo URL, ntfy topic) — nothing
 hardcoded.
+
+## Mission control (`/dashboard`)
+
+The onboarding server also serves **`http://<host>:8790/dashboard`** (tailnet-only, like
+everything on that port): live jobs, production deploy phases with links (cached 60s),
+the dead-zone intent queue, the last counsel transcript — and **pending approvals with
+Approve/Deny buttons**, so the shotgun seat can authorize new spend while the driver drives.
 
 ## The two-phase gate (the point of this server)
 

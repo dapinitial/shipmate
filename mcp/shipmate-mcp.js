@@ -173,6 +173,21 @@ const TOOLS = [
     },
   },
   {
+    name: 'shipmate_log',
+    description: "Append a timestamped entry to a project's captains-log.md and commit it " +
+      '(deterministic — the words are stored verbatim). publish:true also pushes, which on ' +
+      'a deploy-on-push repo makes the entry live.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        text: { type: 'string', description: 'The log entry, verbatim' },
+        project: { type: 'string', description: 'Project name (default: current session project)' },
+        publish: { type: 'boolean', description: 'true = also git push (may trigger a deploy)' },
+      },
+      required: ['text'],
+    },
+  },
+  {
     name: 'shipmate_counsel_toggle',
     description: 'Turn multi-model counsel deliberation on or off (off = single Anthropic model, the default).',
     inputSchema: {
@@ -212,6 +227,8 @@ async function callTool(name, args) {
       return wrap(await bridge(['--doctor']));
     case 'shipmate_rollback':
       return wrap(await bridge(['--rollback', proj, ...(a.confirm === true ? ['--yes'] : [])]));
+    case 'shipmate_log':
+      return wrap(await bridge(['--log', proj, ...(a.publish === true ? ['--publish'] : []), a.text]));
     case 'shipmate_counsel':
       return wrap(await bridge(['--counsel', proj, a.question]));
     case 'shipmate_counsel_toggle':
@@ -406,12 +423,81 @@ async function serveOnboard(port) {
 
   const APPROVALS = process.env.SHIPMATE_APPROVALS_DIR
     || path.join(os.homedir(), '.shipmate', 'approvals');
+  const VOICE_STATE = process.env.SHIPMATE_VOICE_STATE
+    || path.join(os.homedir(), '.shipmate', 'voice');
+  const dashHtml = fs.readFileSync(path.join(__dirname, 'dashboard.html'));
+  const deployCache = { ts: 0, entries: [] };
+
+  const readFileSafe = (f) => { try { return fs.readFileSync(f, 'utf8'); } catch { return ''; } };
+  const listDirs = (p) => { try { return fs.readdirSync(p).filter((n) => { try { return fs.statSync(path.join(p, n)).isDirectory(); } catch { return false; } }); } catch { return []; } };
+
+  function dashboardData(cb) {
+    const jobs = listDirs(path.join(VOICE_STATE, 'jobs')).map((id) => {
+      const d = path.join(VOICE_STATE, 'jobs', id);
+      return {
+        id,
+        project: path.basename(readFileSafe(path.join(d, 'project')).trim() || '?'),
+        projectPath: readFileSafe(path.join(d, 'project')).trim(),
+        status: readFileSafe(path.join(d, 'status')).trim() || 'unknown',
+        task: readFileSafe(path.join(d, 'task')).trim().slice(0, 120),
+        started: parseInt(readFileSafe(path.join(d, 'started')).trim(), 10) * 1000 || null,
+      };
+    }).sort((a, b) => Number(b.id) - Number(a.id));
+
+    const approvals = [];
+    for (const n of (() => { try { return fs.readdirSync(APPROVALS); } catch { return []; } })()) {
+      const lines = readFileSafe(path.join(APPROVALS, n)).split('\n');
+      if (lines[0] && lines[0].startsWith('pending'))
+        approvals.push({ nonce: n, desc: (lines[1] || '').slice(0, 200) });
+    }
+
+    const queue = listDirs(path.join(VOICE_STATE, 'queue')).sort().map((id) => ({
+      id,
+      verb: readFileSafe(path.join(VOICE_STATE, 'queue', id, 'verb')).trim(),
+      text: readFileSafe(path.join(VOICE_STATE, 'queue', id, 'text')).trim().slice(0, 120),
+    }));
+
+    const counsel = readFileSafe(path.join(VOICE_STATE, 'last-counsel.txt')).slice(-4000);
+    const sessionProject = readFileSafe(path.join(VOICE_STATE, 'session.project')).trim();
+
+    // Deploy phases via do-app.sh, cached — doctl on every 5s refresh would be rude.
+    const projects = [...new Set([sessionProject, ...jobs.map((j) => j.projectPath)]
+      .filter((p) => p && fs.existsSync(path.join(p, '.do', 'app.yaml'))))];
+    if (Date.now() - deployCache.ts < 60000 || projects.length === 0) {
+      return cb({ jobs, approvals, queue, counsel, deploys: deployCache.entries, generated: Date.now() });
+    }
+    const appsh = path.join(__dirname, '..', 'skills', 'deploy', 'bin', 'do-app.sh');
+    let pending = projects.length;
+    const entries = [];
+    projects.forEach((p) => {
+      execFile('bash', [appsh, 'status', p], { timeout: 20000 }, (err, stdout) => {
+        if (!err && stdout) {
+          const get = (k) => ((stdout.match(new RegExp('^' + k + ':\\s*(.*)$', 'm')) || [])[1] || '').trim();
+          entries.push({ project: path.basename(p), url: get('url'), deploy: get('deploy') });
+        }
+        if (--pending === 0) {
+          deployCache.ts = Date.now(); deployCache.entries = entries;
+          cb({ jobs, approvals, queue, counsel, deploys: entries, generated: Date.now() });
+        }
+      });
+    });
+  }
 
   http.createServer((req, res) => {
     const url = req.url.split('?')[0];
     if (req.method === 'GET' && (url === '/' || url === '/index.html')) {
       res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
       return res.end(html);
+    }
+    if (req.method === 'GET' && url === '/dashboard') {
+      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+      return res.end(dashHtml);
+    }
+    if (req.method === 'GET' && url === '/api/dashboard') {
+      return dashboardData((data) => {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(data));
+      });
     }
     // Tap-to-confirm: ntfy action buttons land here. Tailnet-only by construction —
     // this server never binds anywhere else — so reading the notification is not

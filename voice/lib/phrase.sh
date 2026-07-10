@@ -58,6 +58,8 @@ phrase_verb() {
       echo rollback; return ;;
     doctor|health\ check|preflight|pre\ flight|are\ we\ healthy*|how\'s\ the\ system*)
       echo doctor; return ;;
+    log\ *|captain\'s\ log\ *)
+      echo log; return ;;
     work\ on\ *|have\ an\ agent*|start\ a\ job*|*\ in\ the\ background)
       echo job; return ;;
   esac
@@ -88,4 +90,10 @@ phrase_job_id() {
 phrase_task() {
   printf '%s' "${1:-}" \
     | sed -E 's/^(work on|have an agent( to)?|start a job( to)?) //; s/ in the background$//'
+}
+
+# phrase_log_body <normalized-no-confirm> — the entry minus its trigger words. Any leading
+# "to <project>" is left in place; the bridge (which can see the filesystem) peels it off.
+phrase_log_body() {
+  printf '%s' "${1:-}" | sed -E "s/^(captain's log|log)( that)? //"
 }

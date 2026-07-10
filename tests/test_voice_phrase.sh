@@ -49,6 +49,9 @@ ok "in the background"   "$(phrase_verb 'add tests to panogram in the background
 ok "deploy = say"        "$(phrase_verb 'deploy panogram')"                           say
 ok "question = say"      "$(phrase_verb 'what will that cost per month')"             say
 ok "stopword not stop"   "$(phrase_verb 'deploy the stopwatch app')"                  say
+ok "log verb"            "$(phrase_verb 'log crossed into utah')"                     log
+ok "captain's log"       "$(phrase_verb "captain's log the dish held")"               log
+ok "log to project"      "$(phrase_verb 'log to shotgun detour sunset at moab')"      log
 ok "doctor"              "$(phrase_verb 'doctor')"                                    doctor
 ok "preflight"           "$(phrase_verb 'preflight')"                                 doctor
 ok "health check"        "$(phrase_verb 'health check')"                              doctor
@@ -72,6 +75,12 @@ ok "digits"        "$(phrase_job_id 'stop job 3')"          3
 ok "spoken number" "$(phrase_job_id 'result of job two')"   2
 ok "first number"  "$(phrase_job_id 'job 12 not 9')"        12
 ok "none is empty" "$(phrase_job_id 'stop the job')"        ""
+
+echo "log body extraction:"
+ok "strips log"           "$(phrase_log_body 'log crossed into utah')"                "crossed into utah"
+ok "strips captain's log" "$(phrase_log_body "captain's log the dish held")"          "the dish held"
+ok "keeps to-project"     "$(phrase_log_body 'log to shotgun detour sunset at moab')" "to shotgun detour sunset at moab"
+ok "log that"             "$(phrase_log_body 'log that we hit vail')"                 "we hit vail"
 
 echo "task extraction:"
 ok "work on"            "$(phrase_task 'work on adding dark mode')"                    "adding dark mode"

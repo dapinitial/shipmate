@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>shipmate — mission control</title>
+<style>
+  :root { --bg:#0b1020; --card:#141b31; --ink:#e8ecf8; --dim:#94a3c0; --acc:#4da3ff;
+          --ok:#39d98a; --warn:#ffb44d; --bad:#ff7a7a; }
+  @media (prefers-color-scheme: light) {
+    :root { --bg:#f4f6fb; --card:#ffffff; --ink:#16203a; --dim:#5a6b8c; --acc:#0b6fd6;
+            --ok:#0c8f57; --warn:#b26a00; --bad:#c23b3b; }
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+         background:var(--bg); color:var(--ink); padding:1rem; }
+  .wrap { max-width:900px; margin:0 auto; }
+  h1 { font-size:1.3rem; margin:.3rem 0 .1rem; } h1 span{ opacity:.55; font-weight:400; font-size:.95rem; }
+  .stamp { color:var(--dim); font-size:.8rem; margin-bottom:.9rem; }
+  .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(260px,1fr)); gap:.8rem; }
+  .card { background:var(--card); border-radius:.8rem; padding: .85rem 1rem; }
+  .card h2 { font-size:.8rem; text-transform:uppercase; letter-spacing:.06em;
+             color:var(--dim); margin:.1rem 0 .55rem; }
+  .row { padding:.4rem 0; border-top:1px solid rgba(125,150,255,.12); font-size:.92rem; }
+  .row:first-of-type { border-top:0; }
+  .pill { display:inline-block; border-radius:99px; padding:.05rem .55rem; font-size:.75rem; margin-right:.4rem; }
+  .running { background:rgba(255,180,77,.18); color:var(--warn); }
+  .done, .ACTIVE { background:rgba(57,217,138,.16); color:var(--ok); }
+  .failed, .stopped, .ERROR { background:rgba(255,122,122,.16); color:var(--bad); }
+  .BUILDING, .DEPLOYING, .PENDING { background:rgba(77,163,255,.16); color:var(--acc); }
+  .dim { color:var(--dim); } .mono { font-family:ui-monospace,Menlo,monospace; font-size:.82em; }
+  .empty { color:var(--dim); font-style:italic; font-size:.9rem; }
+  button { border:0; border-radius:.5rem; color:#fff; padding:.4rem .8rem; font-size:.85rem;
+           cursor:pointer; margin-right:.4rem; }
+  .approve { background:var(--ok); } .deny { background:var(--bad); }
+  details { margin-top:.8rem; } summary { cursor:pointer; color:var(--dim); font-size:.85rem; }
+  pre { white-space:pre-wrap; font-size:.78rem; background:rgba(125,150,255,.07);
+        border-radius:.6rem; padding:.7rem; max-height:40vh; overflow-y:auto; }
+  a { color:var(--acc); text-decoration:none; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>⚓ shipmate <span>mission control</span></h1>
+  <div class="stamp" id="stamp">connecting…</div>
+  <div class="grid">
+    <div class="card"><h2>Approvals — needs a thumb</h2><div id="approvals"></div></div>
+    <div class="card"><h2>Jobs</h2><div id="jobs"></div></div>
+    <div class="card"><h2>Production deploys</h2><div id="deploys"></div></div>
+    <div class="card"><h2>Dead-zone queue</h2><div id="queue"></div></div>
+  </div>
+  <details><summary>Last counsel transcript</summary><pre id="counsel">—</pre></details>
+</div>
+<script>
+  const $ = (id) => document.getElementById(id);
+  const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+  const empty = (msg) => '<div class="empty">' + msg + '</div>';
+
+  async function act(kind, nonce) {
+    await fetch('/' + kind + '/' + nonce, { method: 'POST' });
+    refresh();
+  }
+
+  function mins(ts) {
+    if (!ts) return '';
+    const m = Math.round((Date.now() - ts) / 60000);
+    return m < 60 ? m + 'm' : Math.round(m / 60) + 'h';
+  }
+
+  async function refresh() {
+    let d;
+    try { d = await (await fetch('/api/dashboard')).json(); }
+    catch { $('stamp').textContent = 'host unreachable — retrying'; return; }
+    $('stamp').textContent = 'live · updated ' + new Date(d.generated).toLocaleTimeString();
+
+    $('approvals').innerHTML = d.approvals.length ? d.approvals.map((a) =>
+      '<div class="row">' + esc(a.desc) +
+      '<div style="margin-top:.45rem"><button class="approve" onclick="act(\'approve\',\'' + a.nonce + '\')">✅ Approve</button>' +
+      '<button class="deny" onclick="act(\'deny\',\'' + a.nonce + '\')">❌ Deny</button></div></div>'
+    ).join('') : empty('nothing waiting');
+
+    $('jobs').innerHTML = d.jobs.length ? d.jobs.map((j) =>
+      '<div class="row"><span class="pill ' + esc(j.status) + '">' + esc(j.status) + '</span>' +
+      '<b>#' + esc(j.id) + '</b> ' + esc(j.project) +
+      (j.status === 'running' && j.started ? ' <span class="dim">' + mins(j.started) + '</span>' : '') +
+      '<div class="dim mono">' + esc(j.task) + '</div></div>'
+    ).join('') : empty('no jobs yet');
+
+    $('deploys').innerHTML = d.deploys.length ? d.deploys.map((x) => {
+      const phase = (x.deploy || '').split(/\s+/)[0] || '?';
+      return '<div class="row"><span class="pill ' + esc(phase) + '">' + esc(phase) + '</span>' +
+        esc(x.project) + (x.url ? ' <a href="' + esc(x.url) + '" target="_blank" class="mono">open ↗</a>' : '') +
+        '<div class="dim mono">' + esc(x.deploy || '') + '</div></div>';
+    }).join('') : empty('no tracked apps (cache warms on first job/session)');
+
+    $('queue').innerHTML = d.queue.length ? d.queue.map((q) =>
+      '<div class="row"><span class="pill BUILDING">' + esc(q.verb) + '</span>' +
+      '<span class="mono">' + esc(q.text) + '</span></div>'
+    ).join('') : empty('no dead-zone backlog');
+
+    $('counsel').textContent = d.counsel || 'no deliberations yet';
+  }
+  refresh();
+  setInterval(refresh, 5000);
+</script>
+</body>
+</html>
