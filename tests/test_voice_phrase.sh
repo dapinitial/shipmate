@@ -49,6 +49,9 @@ ok "in the background"   "$(phrase_verb 'add tests to panogram in the background
 ok "deploy = say"        "$(phrase_verb 'deploy panogram')"                           say
 ok "question = say"      "$(phrase_verb 'what will that cost per month')"             say
 ok "stopword not stop"   "$(phrase_verb 'deploy the stopwatch app')"                  say
+ok "doctor"              "$(phrase_verb 'doctor')"                                    doctor
+ok "preflight"           "$(phrase_verb 'preflight')"                                 doctor
+ok "health check"        "$(phrase_verb 'health check')"                              doctor
 ok "roll back"           "$(phrase_verb 'roll back panogram')"                        rollback
 ok "rollback one word"   "$(phrase_verb 'rollback panogram')"                         rollback
 ok "undo the deploy"     "$(phrase_verb 'undo the deploy on panogram')"               rollback

@@ -153,6 +153,12 @@ const TOOLS = [
     },
   },
   {
+    name: 'shipmate_doctor',
+    description: 'One-sentence system health check: internet, tailnet, MCP server, provider ' +
+      'auth, disk, running jobs, queued dead-zone intents. Deterministic and fast.',
+    inputSchema: { type: 'object', properties: {} },
+  },
+  {
     name: 'shipmate_rollback',
     description: 'Roll a project back to its previous successful deployment (DigitalOcean; ' +
       'cost-neutral, reversible by redeploying). Without confirm:true it only DESCRIBES what ' +
@@ -202,6 +208,8 @@ async function callTool(name, args) {
       return wrap(await bridge(['--result', ...(a.job_id != null ? [String(a.job_id)] : [])]));
     case 'shipmate_task_stop':
       return wrap(await bridge(['--stop', ...(a.job_id != null ? [String(a.job_id)] : [])]));
+    case 'shipmate_doctor':
+      return wrap(await bridge(['--doctor']));
     case 'shipmate_rollback':
       return wrap(await bridge(['--rollback', proj, ...(a.confirm === true ? ['--yes'] : [])]));
     case 'shipmate_counsel':

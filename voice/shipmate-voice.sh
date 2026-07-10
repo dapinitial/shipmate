@@ -46,10 +46,17 @@ Verbs it hears (case/punctuation don't matter):
                               default Anthropic model answers. Toggle ON: fans out to
                               SHIPMATE_COUNSEL_MODELS in parallel + a chair synthesis
                               that must name the dissent. "counsel on" / "counsel off".
-  status                      running/finished jobs
+  status                      running/finished jobs + live deploy phases
+  roll back <project> [confirm]   describe, then revert the live deploy (deterministic)
+  doctor | preflight          one spoken sentence of system health
   result [job N]              speak a job's summary
   stop [job N]                stop a running job
   new session                 forget the current conversation
+
+On the road: model turns run in the background — answers within SHIPMATE_TURN_BUDGET
+seconds (default 25) are spoken; slower ones arrive as a push notification. With no
+internet, intents queue and replay on reconnect (a launchd timer + any online utterance
+flushes them).
 
 Machine interface (no phrase parsing — used by mcp/shipmate-mcp.js):
   --turn <plan|execute> <project|-> <request…>    one conversational turn
@@ -57,6 +64,8 @@ Machine interface (no phrase parsing — used by mcp/shipmate-mcp.js):
   --status-report | --result [N] | --stop [N]     job management
   --counsel <project|-> <question…>               deliberate (respects the toggle)
   --counsel-set <on|off>                          flip the counsel toggle
+  --rollback <project|-> [--yes] | --doctor       lifecycle + health
+  --flush-queue                                   replay queued dead-zone intents
 
 Environment (put exports in ~/.shipmate/voice.env):
   SHIPMATE_SITES_ROOT    where projects live (default ~/Sites)
@@ -127,7 +136,7 @@ turn() { # <phrase> <mode:plan|execute> <project dir>
   if [ -f "$STATE_DIR/session.project" ]; then old_project="$(cat "$STATE_DIR/session.project")"; fi
   # A different project means a different cwd — start a fresh session there.
   if [ -n "$sid" ] && [ "$old_project" != "$project" ]; then sid=""; fi
-  cd "$project"
+  cd "$project" 2>/dev/null || { speak "I can't find the project directory for $(basename "$project")."; return 1; }
 
   if [ "$mode" = "execute" ]; then
     perm="acceptEdits"
@@ -192,7 +201,7 @@ counsel() { # <question> <project dir>
   local models="${SHIPMATE_COUNSEL_MODELS:-claude-fable-5 claude-opus-4-8 claude-sonnet-5}"
   local tmp m n=0 answers="" chair=""
   tmp="$(mktemp -d "${TMPDIR:-/tmp}/shipmate-counsel.XXXXXX")"
-  cd "$project"
+  cd "$project" 2>/dev/null || { speak "I can't find the project directory for $(basename "$project")."; return 1; }
 
   for m in $models; do
     claude -p --model "$m" --permission-mode plan \
@@ -229,6 +238,104 @@ $(cat "$tmp/$m.txt")"
   else speak "The counsel answered but the chair failed to synthesize. $n opinions are in last-counsel dot t x t on the Mac."; fi
 }
 
+# ---- intents: budgeted async turns + the offline queue ------------------------------------
+# An intent is a tiny dir {verb,mode,project,text} that one runner can execute now (async
+# turn), or later (dead-zone queue) — driving means answers must never depend on holding a
+# connection open or on continuous coverage.
+
+online() {
+  [ -n "${SHIPMATE_FORCE_OFFLINE:-}" ] && return 1
+  local code
+  code="$(curl -s -m 4 -o /dev/null -w '%{http_code}' "https://api.anthropic.com" 2>/dev/null || echo 000)"
+  [ "$code" != "000" ]
+}
+
+intent_write() { # <dir> <verb> <mode> <project> <text>
+  mkdir -p "$1"
+  printf '%s' "$2" > "$1/verb"
+  printf '%s' "$3" > "$1/mode"
+  printf '%s' "$4" > "$1/project"
+  printf '%s' "$5" > "$1/text"
+}
+
+intent_run() { # <dir> — execute the stored intent; mark done; push the result if detached
+  local d="$1" verb mode project text
+  verb="$(cat "$d/verb")"; mode="$(cat "$d/mode")"
+  project="$(cat "$d/project")"; text="$(cat "$d/text")"
+  case "$verb" in
+    say)     turn "$text" "$mode" "$project" > "$d/out" 2>&1 || true ;;
+    counsel) counsel "$text" "$project"      > "$d/out" 2>&1 || true ;;
+    job)     dispatch_job "$text" "$project" > "$d/out" 2>&1 || true ;;
+    *)       printf 'unknown intent verb %s' "$verb" > "$d/out" ;;
+  esac
+  : > "$d/done"
+  if [ -f "$d/detached" ]; then
+    notify "shipmate: $(clip 400 < "$d/out")"
+  fi
+}
+
+# run_or_queue <verb> <mode> <project> <text> — the driving-aware dispatcher.
+# Offline → queue (result arrives by push after reconnect). Online → run in the background,
+# wait up to SHIPMATE_TURN_BUDGET seconds (default 25); a fast answer is spoken, a slow one
+# detaches and lands as a notification — the Shortcut never times out again.
+run_or_queue() {
+  local verb="$1" mode="$2" project="$3" text="$4" d budget waited=0
+  if ! online; then
+    d="$STATE_DIR/queue/$(date +%s)-$$"
+    intent_write "$d" "$verb" "$mode" "$project" "$text"
+    : > "$d/detached"
+    speak "Dead zone — I can't reach Claude from here. Queued; I'll run it and ping your phone when we're back online."
+    return 0
+  fi
+  d="$STATE_DIR/turns/$(date +%s)-$$"
+  intent_write "$d" "$verb" "$mode" "$project" "$text"
+  nohup bash "$SELF" --intent-runner "$d" >/dev/null 2>&1 &
+  budget="${SHIPMATE_TURN_BUDGET:-25}"
+  while [ "$waited" -lt "$budget" ]; do
+    if [ -f "$d/done" ]; then cat "$d/out"; return 0; fi
+    sleep 1; waited=$((waited + 1))
+  done
+  : > "$d/detached"
+  if [ -f "$d/done" ]; then rm -f "$d/detached"; cat "$d/out"; return 0; fi
+  speak "Still working — I'll ping your phone with the answer."
+}
+
+flush_queue() { # replay queued intents FIFO once we're back online (results go by push)
+  online || return 0
+  local d
+  for d in "$STATE_DIR/queue"/*/; do
+    [ -d "$d" ] || continue
+    intent_run "$d"
+    rm -rf "$d"
+  done
+}
+
+# ---- doctor: one spoken sentence of system health ------------------------------------------
+
+verb_doctor() {
+  local line="" ip njobs nq d
+  if online; then line="Internet up."; else line="Internet DOWN — I'll queue what you ask."; fi
+  ip="$(ifconfig 2>/dev/null | awk '$1=="inet" && $2 ~ /^100\./ {split($2,o,"."); if (o[2]>=64 && o[2]<=127) {print $2; exit}}')"
+  if [ -n "$ip" ]; then line="$line Tailnet connected."; else line="$line Tailnet NOT connected."; fi
+  if [ -f "$HOME/.shipmate/mcp/http-token" ] && curl -s -m 4 -o /dev/null -X POST \
+      "http://127.0.0.1:8788/mcp/$(cat "$HOME/.shipmate/mcp/http-token")" \
+      -H 'Content-Type: application/json' -d '{"jsonrpc":"2.0","id":1,"method":"ping"}' 2>/dev/null; then
+    line="$line MCP server up."
+  else line="$line MCP server DOWN."; fi
+  if command -v doctl >/dev/null 2>&1; then
+    if online && doctl account get >/dev/null 2>&1; then line="$line DigitalOcean auth good."
+    elif online; then line="$line DigitalOcean auth FAILING."; fi
+  fi
+  line="$line Disk $(df -h / 2>/dev/null | awk 'NR==2 {print $5}' ) used."
+  njobs=0; nq=0
+  for d in "$JOBS_DIR"/*/; do
+    if [ -d "$d" ] && [ "$(cat "$d/status" 2>/dev/null)" = "running" ]; then njobs=$((njobs+1)); fi
+  done
+  for d in "$STATE_DIR/queue"/*/; do if [ -d "$d" ]; then nq=$((nq+1)); fi; done
+  line="$line $njobs jobs running, $nq intents queued."
+  speak "$(printf '%s' "$line" | clip 800)"
+}
+
 # ---- background jobs ---------------------------------------------------------------------
 
 dispatch_job() { # <task phrase> <project dir>
@@ -252,7 +359,7 @@ dispatch_job() { # <task phrase> <project dir>
 job_runner() { # <job dir> — runs headless, writes result/status, pushes a notification
   local jdir="$1" task project prompt out result status
   task="$(cat "$jdir/task")"; project="$(cat "$jdir/project")"
-  cd "$project"
+  cd "$project" 2>/dev/null || { speak "I can't find the project directory for $(basename "$project")."; return 1; }
   prompt="Background agent job; no human is watching, so never ask questions — decide and proceed. Task: \"$task\".
 Rules: work on a NEW git branch and never commit to or push the default branch (a push there can trigger a production deploy). Run the project's tests if it has any. NEVER deploy, publish, create infrastructure, or take any action that costs money — if the task needs that, prepare everything and stop. End your reply with 'SUMMARY:' followed by 2-3 plain sentences suitable to be read aloud."
   if out="$(claude -p --output-format json --permission-mode acceptEdits \
@@ -368,7 +475,9 @@ verb_stop() { # <normalized phrase>
 
 case "${1:-}" in
   -h|--help) usage; exit 0 ;;
-  --job-runner) mkdir -p "$JOBS_DIR"; job_runner "$2"; exit 0 ;;
+  --job-runner)    mkdir -p "$JOBS_DIR"; job_runner "$2"; exit 0 ;;
+  --intent-runner) mkdir -p "$JOBS_DIR"; intent_run "$2"; exit 0 ;;
+  --flush-queue)   mkdir -p "$JOBS_DIR"; flush_queue; exit 0 ;;
 esac
 
 if ! command -v claude >/dev/null 2>&1; then
@@ -404,7 +513,13 @@ case "${1:-}" in
     PROJ="$(project_or_default "$(resolve_project "$(phrase_normalize "${2:-}")")")"
     MODE="plan"; [ "${3:-}" = "--yes" ] && MODE="execute"
     verb_rollback "$PROJ" "$MODE"; exit $? ;;
+  --doctor) verb_doctor; exit 0 ;;
 esac
+
+# Opportunistic queue flush: any utterance while online drains the dead-zone backlog.
+if [ -d "$STATE_DIR/queue" ] && [ -n "$(ls "$STATE_DIR/queue" 2>/dev/null)" ]; then
+  nohup bash "$SELF" --flush-queue >/dev/null 2>&1 &
+fi
 
 PHRASE="${*:-}"
 # No argument? Read stdin — Shortcuts' "Run Script Over SSH" passes its Input that way.
@@ -425,8 +540,9 @@ case "$VERB" in
   stop)   verb_stop "$CLEAN" ;;
   counsel_on)  counsel_toggle on ;;
   counsel_off) counsel_toggle off ;;
+  doctor)   verb_doctor ;;
   rollback) verb_rollback "$(project_or_default "$(resolve_project "$CLEAN")")" "$MODE" ;;
-  counsel) counsel "$(phrase_counsel_question "$CLEAN")" "$(project_or_default "$(resolve_project "$CLEAN")")" ;;
-  job)    dispatch_job "$(phrase_task "$CLEAN")" "$(project_or_default "$(resolve_project "$CLEAN")")" ;;
-  say)    turn "$CLEAN" "$MODE" "$(project_or_default "$(resolve_project "$CLEAN")")" ;;
+  counsel) run_or_queue counsel "$MODE" "$(project_or_default "$(resolve_project "$CLEAN")")" "$(phrase_counsel_question "$CLEAN")" ;;
+  job)    run_or_queue job "$MODE" "$(project_or_default "$(resolve_project "$CLEAN")")" "$(phrase_task "$CLEAN")" ;;
+  say)    run_or_queue say "$MODE" "$(project_or_default "$(resolve_project "$CLEAN")")" "$CLEAN" ;;
 esac

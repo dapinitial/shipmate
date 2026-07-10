@@ -56,6 +56,8 @@ phrase_verb() {
       echo counsel; return ;;
     roll\ back*|rollback*|undo\ the\ deploy*|undo\ the\ last\ deploy*|revert\ the\ deploy*)
       echo rollback; return ;;
+    doctor|health\ check|preflight|pre\ flight|are\ we\ healthy*|how\'s\ the\ system*)
+      echo doctor; return ;;
     work\ on\ *|have\ an\ agent*|start\ a\ job*|*\ in\ the\ background)
       echo job; return ;;
   esac

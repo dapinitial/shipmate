@@ -31,6 +31,7 @@ by hand. Setup in **[apple-shortcut.md](apple-shortcut.md)**.
 | *"counsel on whether we should move to Vercel"* | **Deliberate** (read-only, never acts). Toggle off (default): the default Anthropic model answers. Toggle on: a multi-model panel answers in parallel and a chair synthesizes, naming the dissent. Full transcript lands in `~/.shipmate/voice/last-counsel.txt`. |
 | *"counsel on"* / *"counsel off"* | Flip the deliberation toggle. |
 | *"status"* / *"how's it going?"* | Jobs (running/done) **and** each project's live production deploy phase. |
+| *"doctor"* / *"preflight"* | One spoken sentence: internet, tailnet, MCP server, DO auth, disk, jobs, queued intents. |
 | *"roll back panogram"* → *"…confirm"* | Describe, then revert to the previous successful deployment — **deterministic** (no model in the loop), cost-neutral, DO for now. |
 | *"result"* / *"what happened with job 2?"* | Speaks a finished job's summary. |
 | *"stop job 2"* | Kills a running job. |
@@ -38,6 +39,17 @@ by hand. Setup in **[apple-shortcut.md](apple-shortcut.md)**.
 
 Projects are matched by name against `~/Sites` (configurable). Follow-ups that don't name a
 project stay with the one you're already talking about.
+
+## Built for the road
+
+- **No more waiting on a held connection.** Model turns run in the background: an answer
+  within `SHIPMATE_TURN_BUDGET` seconds (default 25) is spoken; a slower one says *"still
+  working"* and arrives as a push → CarPlay announces it. The Shortcut can't time out.
+- **Dead zones queue instead of failing.** No route to Claude → the intent is stored and
+  you hear *"queued"*. A launchd timer (and any later utterance) replays the queue on
+  reconnect and pushes the results.
+- **"Doctor"** is the pre-flight: one sentence covering internet, tailnet, servers, provider
+  auth, disk, jobs, and the queue.
 
 ## Safety (the whole reason this is careful)
 

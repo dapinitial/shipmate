@@ -42,6 +42,7 @@ OAuth are the production path — this is the experiment path.
 | `shipmate_task_start` | background agent job (build/test) | branch-only, never deploys, never bills |
 | `shipmate_task_result` | a finished job's summary | read-only |
 | `shipmate_task_stop` | stop a running job | — |
+| `shipmate_doctor` | one-sentence health check (net, tailnet, servers, auth, disk, jobs, queue) | read-only, deterministic |
 | `shipmate_rollback` | revert to the previous successful deployment (DO) | describe-only unless `confirm:true`; deterministic |
 | `shipmate_counsel` | deliberate on a question (single model, or multi-model panel + dissent when the toggle is on) | read-only always |
 | `shipmate_counsel_toggle` | counsel on/off (off = single Anthropic model, the default) | — |

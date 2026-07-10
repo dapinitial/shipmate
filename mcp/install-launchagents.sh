@@ -32,11 +32,13 @@ UID_NUM="$(id -u)"
 NODE="$(command -v node || true)"
 [ -z "$NODE" ] && { echo "✗ node not found on PATH — install Node.js first." >&2; exit 1; }
 
-# label → args, one per service (bash 3.2: no associative arrays)
+# label → kind|args, one per service (bash 3.2: no associative arrays).
+# kind=server → node shipmate-mcp.js, KeepAlive. kind=timer → bash bridge, StartInterval.
 services() {
   printf '%s\n' \
-    "com.shipmate.mcp-http|--http|8788" \
-    "com.shipmate.mcp-onboard|--onboard|8790"
+    "com.shipmate.mcp-http|server|--http|8788" \
+    "com.shipmate.mcp-onboard|server|--onboard|8790" \
+    "com.shipmate.queue-flush|timer|--flush-queue|60"
 }
 
 remove_all() {
@@ -59,8 +61,17 @@ mkdir -p "$AGENTS" "$LOGDIR"
 pkill -f 'shipmate-mcp.js --(http|onboard)' 2>/dev/null || true
 sleep 1
 
-services | while IFS='|' read -r label mode port; do
+BRIDGE="$(cd "$DIR/../voice" && pwd)/shipmate-voice.sh"
+
+services | while IFS='|' read -r label kind mode extra; do
   plist="$AGENTS/$label.plist"
+  if [ "$kind" = "server" ]; then
+    prog="<string>$NODE</string><string>$SERVER</string><string>$mode</string><string>$extra</string>"
+    sched="<key>KeepAlive</key><true/><key>ThrottleInterval</key><integer>15</integer>"
+  else
+    prog="<string>/bin/bash</string><string>$BRIDGE</string><string>$mode</string>"
+    sched="<key>StartInterval</key><integer>$extra</integer>"
+  fi
   cat > "$plist" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -68,15 +79,9 @@ services | while IFS='|' read -r label mode port; do
 <dict>
   <key>Label</key><string>$label</string>
   <key>ProgramArguments</key>
-  <array>
-    <string>$NODE</string>
-    <string>$SERVER</string>
-    <string>$mode</string>
-    <string>$port</string>
-  </array>
+  <array>$prog</array>
   <key>RunAtLoad</key><true/>
-  <key>KeepAlive</key><true/>
-  <key>ThrottleInterval</key><integer>15</integer>
+  $sched
   <key>EnvironmentVariables</key>
   <dict>
     <key>PATH</key>
@@ -89,7 +94,7 @@ services | while IFS='|' read -r label mode port; do
 EOF
   launchctl bootout "gui/$UID_NUM/$label" 2>/dev/null || true
   launchctl bootstrap "gui/$UID_NUM" "$plist"
-  echo "✓ $label → $mode $port (log: $LOGDIR/$label.log)"
+  echo "✓ $label → $mode $extra (log: $LOGDIR/$label.log)"
 done
 
 echo
