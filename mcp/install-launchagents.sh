@@ -38,7 +38,8 @@ services() {
   printf '%s\n' \
     "com.shipmate.mcp-http|server|--http|8788" \
     "com.shipmate.mcp-onboard|server|--onboard|8790" \
-    "com.shipmate.queue-flush|timer|--flush-queue|60"
+    "com.shipmate.queue-flush|timer|--flush-queue|60" \
+    "com.shipmate.watchdog|timer|--watchdog|300"
 }
 
 remove_all() {

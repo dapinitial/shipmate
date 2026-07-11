@@ -28,6 +28,7 @@ if [ -f "$HOME/.shipmate/voice.env" ]; then . "$HOME/.shipmate/voice.env"; fi
 STATE_DIR="${SHIPMATE_VOICE_STATE:-$HOME/.shipmate/voice}"
 SITES_ROOT="${SHIPMATE_SITES_ROOT:-$HOME/Sites}"
 JOBS_DIR="$STATE_DIR/jobs"
+HOSTS_FILE="${SHIPMATE_HOSTS_FILE:-$HOME/.shipmate/hosts}"
 
 usage() {
   cat <<'EOF'
@@ -67,6 +68,7 @@ Machine interface (no phrase parsing — used by mcp/shipmate-mcp.js):
   --counsel-set <on|off>                          flip the counsel toggle
   --rollback <project|-> [--yes] | --doctor       lifecycle + health
   --flush-queue                                   replay queued dead-zone intents
+  --watchdog                                      probe fleet hosts; notify on transitions
 
 Environment (put exports in ~/.shipmate/voice.env):
   SHIPMATE_SITES_ROOT    where projects live (default ~/Sites)
@@ -313,6 +315,48 @@ flush_queue() { # replay queued intents FIFO once we're back online (results go 
     intent_run "$d"
     rm -rf "$d"
   done
+}
+
+# ---- fleet: host routing + cross-host watchdog ---------------------------------------------
+# ~/.shipmate/hosts registers the fleet, one line per host:  alias|user@tailnet-name[|bridge]
+# "at home …" / "on the laptop …" runs the rest of the phrase on that host's bridge over SSH.
+
+host_target() { # <alias> — print "target|bridge" or nothing
+  [ -f "$HOSTS_FILE" ] || return 0
+  awk -F'|' -v a="$1" '$1==a && $1 !~ /^#/ {print $2 "|" ($3 ? $3 : "~/Sites/shipmate/voice/shipmate-voice.sh"); exit}' "$HOSTS_FILE"
+}
+
+route_to_host() { # <alias> <rest of phrase> — 0 if handled remotely, 1 to fall through
+  local alias="$1" rest="$2" entry target bridge out
+  entry="$(host_target "$alias")"
+  [ -z "$entry" ] && return 1
+  target="${entry%%|*}"; bridge="${entry#*|}"
+  if out="$(printf '%s' "$rest" | ssh -o BatchMode=yes -o ConnectTimeout=10 \
+      -o StrictHostKeyChecking=accept-new "$target" "bash $bridge" 2>/dev/null)"; then
+    speak "From $alias: $out"
+  else
+    speak "I couldn't reach the $alias host — it may be asleep or off the tailnet."
+  fi
+  return 0
+}
+
+verb_watchdog() { # timer: probe each fleet host's onboard server; push only on transitions
+  local alias target rest host state prev sdir="$STATE_DIR/watchdog"
+  [ -f "$HOSTS_FILE" ] || return 0
+  mkdir -p "$sdir"
+  while IFS='|' read -r alias target rest; do
+    case "$alias" in ''|\#*) continue ;; esac
+    host="${target#*@}"
+    if curl -s -m 8 -o /dev/null "http://$host:${SHIPMATE_ONBOARD_PORT:-8790}/api/info" 2>/dev/null; then
+      state="up"
+    else state="down"; fi
+    prev="$(cat "$sdir/$alias" 2>/dev/null || true)"
+    printf '%s' "$state" > "$sdir/$alias"
+    if [ -n "$prev" ] && [ "$prev" != "$state" ]; then
+      if [ "$state" = "down" ]; then notify "watchdog: the $alias host ($host) stopped answering."
+      else notify "watchdog: the $alias host ($host) is back."; fi
+    fi
+  done < "$HOSTS_FILE"
 }
 
 # ---- captain's log: deterministic journal append (your words, your publish gate) -----------
@@ -564,7 +608,8 @@ case "${1:-}" in
     PROJ="$(project_or_default "$(resolve_project "$(phrase_normalize "${2:-}")")")"
     MODE="plan"; [ "${3:-}" = "--yes" ] && MODE="execute"
     verb_rollback "$PROJ" "$MODE"; exit $? ;;
-  --doctor) verb_doctor; exit 0 ;;
+  --doctor)   verb_doctor; exit 0 ;;
+  --watchdog) verb_watchdog; exit 0 ;;
   --log)
     PROJ="${2:-}"; shift 2
     PUB="plan"; if [ "${1:-}" = "--publish" ]; then PUB="execute"; shift; fi
@@ -583,6 +628,14 @@ if [ -z "$PHRASE" ] && [ ! -t 0 ]; then PHRASE="$(cat)"; fi
 if [ -z "$PHRASE" ]; then speak "shipmate: tell me what to ship."; exit 1; fi
 
 NORM="$(phrase_normalize "$PHRASE")"
+
+# Fleet routing: "at home …" / "on the laptop …" runs the rest on that host. Only fires
+# when the alias is registered in ~/.shipmate/hosts — idioms fall through untouched.
+ROUTE="$(phrase_route "$NORM")"
+if [ -n "$ROUTE" ] && [ "$ROUTE" != "${ROUTE#* }" ]; then
+  if route_to_host "${ROUTE%% *}" "${ROUTE#* }"; then exit 0; fi
+fi
+
 MODE="$(phrase_mode "$NORM")"
 CLEAN="$(phrase_strip_confirm "$NORM")"
 # A bare "confirm" / "do it" utterance means: execute what the session just planned.

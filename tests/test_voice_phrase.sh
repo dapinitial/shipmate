@@ -82,6 +82,13 @@ ok "strips captain's log" "$(phrase_log_body "captain's log the dish held")"    
 ok "keeps to-project"     "$(phrase_log_body 'log to shotgun detour sunset at moab')" "to shotgun detour sunset at moab"
 ok "log that"             "$(phrase_log_body 'log that we hit vail')"                 "we hit vail"
 
+echo "route extraction:"
+ok "at home"          "$(phrase_route 'at home work on the blog')"    "home work on the blog"
+ok "on the laptop"    "$(phrase_route 'on the laptop status')"        "laptop status"
+ok "on the imac"      "$(phrase_route 'on the imac deploy panogram')" "imac deploy panogram"
+ok "no prefix empty"  "$(phrase_route 'deploy panogram')"             ""
+ok "idiom passthru"   "$(phrase_route 'on the other hand deploy it')" "other hand deploy it"
+
 echo "task extraction:"
 ok "work on"            "$(phrase_task 'work on adding dark mode')"                    "adding dark mode"
 ok "have an agent to"   "$(phrase_task 'have an agent to fix the tests')"              "fix the tests"

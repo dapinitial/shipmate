@@ -97,3 +97,15 @@ phrase_task() {
 phrase_log_body() {
   printf '%s' "${1:-}" | sed -E "s/^(captain's log|log)( that)? //"
 }
+
+# phrase_route <normalized> — "<alias> <rest>" when the phrase starts with a routing prefix:
+# "at home deploy x" → "home deploy x"; "on the laptop status" → "laptop status". Empty when
+# there's no prefix. The bridge only actually routes when the alias exists in its hosts file,
+# so "on the other hand…" safely falls through to normal handling.
+phrase_route() {
+  case "${1:-}" in
+    at\ home\ *) printf 'home %s' "${1#at home }" ;;
+    on\ the\ *)  printf '%s' "${1#on the }" ;;
+    *) printf '' ;;
+  esac
+}

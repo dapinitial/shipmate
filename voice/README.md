@@ -74,6 +74,18 @@ there's no diff to review. So:
 - **Credentials never move** — doctl/vercel tokens stay in your CLI config; the bridge just
   invokes the local skill.
 
+## The fleet (multiple hosts)
+
+Register hosts in `~/.shipmate/hosts`, one per line: `alias|user@tailnet-name[|bridge-path]`.
+
+- **Routing:** *"at home, work on the blog"* / *"on the laptop, status"* runs the rest of the
+  phrase on that host's bridge over SSH (BatchMode — the caller's key must be in the target's
+  `authorized_keys`; the onboarding page's paste-box does this). Unregistered aliases fall
+  through, so "on the whole…" is still just a sentence.
+- **Watchdog:** a launchd timer (5 min) probes each fleet host's onboarding server and pushes
+  a notification on up/down **transitions** only — if home goes dark while you're on I-70,
+  your phone says so once, not every five minutes.
+
 ## Getting pinged while driving (ntfy)
 
 Job-done notifications go through [ntfy.sh](https://ntfy.sh) (free, no account):
