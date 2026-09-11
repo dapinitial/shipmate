@@ -615,9 +615,17 @@ if [ -d "$STATE_DIR/queue" ] && [ -n "$(ls "$STATE_DIR/queue" 2>/dev/null)" ]; t
 fi
 
 PHRASE="${*:-}"
-# No argument? Read stdin — Shortcuts' "Run Script Over SSH" passes its Input that way.
-if [ -z "$PHRASE" ] && [ ! -t 0 ]; then PHRASE="$(cat)"; fi
-if [ -z "$PHRASE" ]; then speak "shipmate: tell me what to ship."; exit 1; fi
+# No argument? Read stdin — Shortcuts' "Run Script Over SSH" passes its Input that way. With a
+# deadline: an empty dictation leaves the SSH channel open and silent, and a plain `cat` would
+# wait on it forever (the phone shows a spinner, the Mac keeps a bridge process for hours).
+read_stdin() { # [seconds] — stdin → text, or whatever arrived before the deadline
+  local line="" acc="" t="${1:-10}"
+  while IFS= read -r -t "$t" line; do acc="$acc$line"$'\n'; done
+  [ -n "$line" ] && acc="$acc$line"      # final line without a newline (printf '%s' input)
+  printf '%s' "$acc"
+}
+if [ -z "$PHRASE" ] && [ ! -t 0 ]; then PHRASE="$(read_stdin "${SHIPMATE_STDIN_TIMEOUT:-10}")"; fi
+if [ -z "$PHRASE" ]; then speak "shipmate: I didn't catch that — tell me what to ship."; exit 1; fi
 
 NORM="$(phrase_normalize "$PHRASE")"
 
