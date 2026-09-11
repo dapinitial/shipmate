@@ -109,3 +109,49 @@ phrase_route() {
     *) printf '' ;;
   esac
 }
+
+# ---- project resolution --------------------------------------------------------------------
+# Dictation is the weakest link: "unakin" arrives as "anakin", "davidpuerto.com" can never match
+# a directory called davidpuerto.com-portfolio. So a phrase resolves to a project two ways:
+#   1. a word (or two adjacent words joined — "shotgun detour" → shotgundetour) that names a
+#      directory under $SITES_ROOT, case-insensitive;
+#   2. an alias from $SHIPMATE_ALIASES (default ~/.shipmate/aliases): one "alias|target" per
+#      line, target relative to $SITES_ROOT or absolute, "#" comments. Alias keys are compared
+#      lowercase with spaces and punctuation removed, so "you know kin|unakin" catches the
+#      dictation "you know kin". An alias whose target directory is missing is ignored.
+# Returns the resolved directory (no trailing slash) or empty when the phrase names nothing.
+phrase_alias_key() { printf '%s' "${1:-}" | tr '[:upper:]' '[:lower:]' | tr -cd 'a-z0-9'; }
+
+resolve_alias() { # <key> — directory for an alias key, else empty
+  local f="${SHIPMATE_ALIASES:-$HOME/.shipmate/aliases}" a d
+  [ -f "$f" ] || return 0
+  while IFS='|' read -r a d || [ -n "$a" ]; do
+    case "$a" in ''|\#*) continue ;; esac
+    [ "$(phrase_alias_key "$a")" = "$1" ] || continue
+    d="$(printf '%s' "$d" | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//')"
+    case "$d" in /*) ;; *) d="${SITES_ROOT:-$HOME/Sites}/$d" ;; esac
+    if [ -d "$d" ]; then printf '%s' "${d%/}"; fi
+    return 0
+  done < "$f"
+}
+
+resolve_project() { # <normalized phrase>
+  local root="${SITES_ROOT:-$HOME/Sites}" w prev="" prev2="" d base hit
+  for w in $1; do
+    for d in "$root"/*/; do
+      [ -d "$d" ] || continue
+      base="$(basename "$d" | tr '[:upper:]' '[:lower:]')"
+      if [ "$base" = "$w" ] || { [ -n "$prev" ] && [ "$base" = "$prev$w" ]; }; then
+        printf '%s' "${d%/}"; return 0
+      fi
+    done
+    # aliases may span up to three adjacent dictated words ("you know kin")
+    hit="$(resolve_alias "$(phrase_alias_key "$w")")"
+    [ -n "$hit" ] || { [ -n "$prev" ] && hit="$(resolve_alias "$(phrase_alias_key "$prev$w")")"; }
+    [ -n "$hit" ] || { [ -n "$prev2" ] && hit="$(resolve_alias "$(phrase_alias_key "$prev2$prev$w")")"; }
+    if [ -n "$hit" ]; then printf '%s' "$hit"; return 0; fi
+    prev2="$prev"; prev="$w"
+  done
+  printf ''
+}
+

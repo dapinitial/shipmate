@@ -39,7 +39,10 @@ by hand. Setup in **[apple-shortcut.md](apple-shortcut.md)**.
 | *"new session"* / *"start over"* | Forgets the current conversation. |
 
 Projects are matched by name against `~/Sites` (configurable). Follow-ups that don't name a
-project stay with the one you're already talking about.
+project stay with the one you're already talking about. Dictation mangles names, so
+`~/.shipmate/aliases` maps what Siri hears to a directory, one `alias|dir` per line
+(`anakin|unakin`, `portfolio|davidpuerto.com-portfolio`); keys match ignoring case, spaces and
+punctuation.
 
 ## Built for the road
 

@@ -95,6 +95,23 @@ ok "have an agent to"   "$(phrase_task 'have an agent to fix the tests')"       
 ok "background suffix"  "$(phrase_task 'work on adding dark mode in the background')"  "adding dark mode"
 ok "plain passthrough"  "$(phrase_task 'upgrade astro')"                               "upgrade astro"
 
+echo "project resolution (directories + dictation aliases):"
+TMP="$(mktemp -d 2>/dev/null || mktemp -d -t shipmate)"
+mkdir -p "$TMP/sites/unakin" "$TMP/sites/shotgundetour" "$TMP/sites/davidpuerto.com-portfolio" "$TMP/sites/portfolio-lab"
+printf '%s\n' "# dictation aliases" "anakin|unakin" "portfolio|davidpuerto.com-portfolio" "You know kin | unakin" "ghost|does-not-exist" "abs|$TMP/sites/unakin" > "$TMP/aliases"
+SITES_ROOT="$TMP/sites"; SHIPMATE_ALIASES="$TMP/aliases"
+ok "exact dir"              "$(resolve_project 'deploy unakin')"                 "$TMP/sites/unakin"
+ok "normalized dictation"   "$(resolve_project "$(phrase_normalize 'Deploy Unakin, confirm.')")" "$TMP/sites/unakin"
+ok "two words joined"       "$(resolve_project 'log to shotgun detour hello')"   "$TMP/sites/shotgundetour"
+ok "alias single word"      "$(resolve_project 'in anakin do it')"               "$TMP/sites/unakin"
+ok "alias beats prefix dir" "$(resolve_project 'roll back portfolio')"           "$TMP/sites/davidpuerto.com-portfolio"
+ok "alias two words"        "$(resolve_project 'status of you know kin')"        "$TMP/sites/unakin"
+ok "alias absolute target"  "$(resolve_project 'abs status')"                    "$TMP/sites/unakin"
+ok "alias to missing dir"   "$(resolve_project 'deploy ghost')"                  ""
+ok "no project named"       "$(resolve_project 'on the whole deploy it')"        ""
+ok "no aliases file"        "$(SHIPMATE_ALIASES=/nonexistent resolve_project 'in anakin')" ""
+rm -rf "$TMP"; unset SITES_ROOT SHIPMATE_ALIASES
+
 echo
 if [ "$fail" -eq 0 ]; then echo "✓ all $pass assertions passed"; exit 0
 else echo "✗ $fail failed, $pass passed"; exit 1; fi

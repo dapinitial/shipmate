@@ -105,24 +105,7 @@ notify() {
   fi
 }
 
-# resolve_project <normalized phrase> — a word (or two adjacent words joined — dictation
-# writes "shotgun detour" for the dir shotgundetour) that names a dir under the sites root
-# wins (case-insensitive); empty when the phrase names nothing.
-resolve_project() {
-  local w prev="" d base
-  for w in $1; do
-    for d in "$SITES_ROOT"/*/; do
-      if [ -d "$d" ]; then
-        base="$(basename "$d" | tr '[:upper:]' '[:lower:]')"
-        if [ "$base" = "$w" ] || { [ -n "$prev" ] && [ "$base" = "$prev$w" ]; }; then
-          printf '%s' "${d%/}"; return 0
-        fi
-      fi
-    done
-    prev="$w"
-  done
-  printf ''
-}
+# resolve_project lives in lib/phrase.sh (tested); it reads SITES_ROOT and the aliases file.
 
 # project_or_default <resolved-or-empty> — an unnamed project means "the one we're already
 # talking about": the live session's project, else the configured default.
