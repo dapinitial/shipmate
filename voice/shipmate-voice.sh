@@ -151,7 +151,7 @@ turn() { # <phrase> <mode:plan|execute> <project dir>
     # still needs on-screen approval. Override the list via SHIPMATE_VOICE_EXECUTE_TOOLS.
     approve_sh="$VOICE_DIR/../skills/deploy/bin/request-approval.sh"
     exec_tools="${SHIPMATE_VOICE_EXECUTE_TOOLS:-Bash(git:*),Bash(npm:*),Bash(doctl:*),Bash(vercel:*),Bash(gh:*)},Bash($approve_sh:*)"
-    prompt="Spoken request (hands-free driver; reply short enough to read aloud, plain prose, no markdown): \"$phrase\". Mode=EXECUTE: the user has explicitly confirmed — act now, don't re-ask. Cost-neutral steps (git merge, build, push, redeploying an existing app) proceed without hesitation; always state the monthly cost in your reply. For a step that creates NEW billed resources or raises cost (new app, resize, scale): request an out-of-band tap by running $approve_sh 'one-line description with the exact monthly cost' — proceed only if it prints APPROVED; on DENIED or TIMEOUT, stop and say so. NEVER delete resources or user data from a voice session."
+    prompt="Spoken request (hands-free driver; reply short enough to read aloud, plain prose, no markdown): \"$phrase\". Mode=EXECUTE: the user has explicitly confirmed — act now, don't re-ask. Cost-neutral steps (git merge, build, push, redeploying an existing app) proceed without hesitation; always state the monthly cost in your reply. For a step that creates NEW billed resources or raises cost (new app, resize, scale): request an out-of-band tap by running $approve_sh 'one-line description with the exact monthly cost' — proceed only if it prints APPROVED; on DENIED or TIMEOUT, stop and say so. NEVER delete resources or user data from a voice session. Push to 'origin' (the remote the app deploys from) unless the project says otherwise. Report only what you verified: after a push run 'git status -sb' and confirm 'ahead' is gone before saying it pushed or deployed; if a push or command fails, say so plainly and what to do next."
   else
     perm="plan"
     prompt="Spoken request (hands-free driver; reply short enough to read aloud, plain prose, no markdown): \"$phrase\". Mode=PLAN: say what you would do and the exact monthly cost. Create, change, charge, or publish NOTHING."
@@ -160,8 +160,10 @@ turn() { # <phrase> <mode:plan|execute> <project dir>
     prompt="You are shipmate, a voice deploy assistant for this project. Use the /deploy skill for deploy, DNS, and provider work. The bridge switches to execute ONLY when the user's phrase ends with 'confirm', 'do it', 'send it', or 'ship it' — when telling the user how to proceed, quote one of those exactly; never invent another trigger word. $prompt"
   fi
 
-  if ! out="$(claude -p --output-format json --permission-mode "$perm" \
-      ${exec_tools:+--allowedTools "$exec_tools"} \
+  # --allowedTools is variadic: it must NOT be the last flag before the prompt, or it swallows
+  # the prompt as another tool name (claude then reports "Input must be provided…").
+  if ! out="$(claude -p ${exec_tools:+--allowedTools "$exec_tools"} \
+      --output-format json --permission-mode "$perm" \
       ${sid:+--resume "$sid"} ${SHIPMATE_VOICE_CLAUDE_ARGS:-} "$prompt" 2>"$STATE_DIR/last-turn.err")"; then
     # claude reports some failures on stdout (json) rather than stderr — keep both.
     printf '%s' "$out" > "$STATE_DIR/last-turn.out"
