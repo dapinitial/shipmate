@@ -75,6 +75,8 @@ Environment (put exports in ~/.shipmate/voice.env):
   SHIPMATE_PROJECT_DIR   default project when the phrase names none (default: sites root)
   SHIPMATE_VOICE_STATE   state dir (default ~/.shipmate/voice)
   SHIPMATE_NTFY_TOPIC    ntfy.sh topic for job-done pushes (pick a long random name)
+  SHIPMATE_VOICE_JOB_TOOLS   tool allowlist for background jobs (default: git branch/edit/commit,
+                         npm/npx/node and friends — no push, no doctl/vercel/gh)
   SHIPMATE_NTFY_URL      ntfy server (default https://ntfy.sh)
   SHIPMATE_VOICE_CLAUDE_ARGS   extra args appended to every claude invocation
 EOF
@@ -442,7 +444,12 @@ job_runner() { # <job dir> — runs headless, writes result/status, pushes a not
   cd "$project" 2>/dev/null || { speak "I can't find the project directory for $(basename "$project")."; return 1; }
   prompt="Background agent job; no human is watching, so never ask questions — decide and proceed. Task: \"$task\".
 Rules: work on a NEW git branch and never commit to or push the default branch (a push there can trigger a production deploy). Run the project's tests if it has any. NEVER deploy, publish, create infrastructure, or take any action that costs money — if the task needs that, prepare everything and stop. End your reply with 'SUMMARY:' followed by 2-3 plain sentences suitable to be read aloud."
-  if out="$(claude -p --output-format json --permission-mode acceptEdits \
+  # Workers are untrusted by design: the allowlist lets them branch, edit, build and test, and
+  # contains no `git push` and no provider CLI — shipping passes back through the gate. Headless
+  # runs have nobody to approve a prompt, so anything outside this list is simply refused.
+  # (--allowedTools is variadic: keep it ahead of the other flags or it swallows the prompt.)
+  job_tools="${SHIPMATE_VOICE_JOB_TOOLS:-Bash(git status:*),Bash(git branch:*),Bash(git checkout:*),Bash(git switch:*),Bash(git add:*),Bash(git commit:*),Bash(git diff:*),Bash(git log:*),Bash(git show:*),Bash(git stash:*),Bash(git rev-parse:*),Bash(git merge-base:*),Bash(npm:*),Bash(npx:*),Bash(node:*),Bash(pnpm:*),Bash(yarn:*),Bash(bun:*),Bash(ls:*),Bash(cat:*),Bash(grep:*),Bash(rg:*),Bash(find:*)}"
+  if out="$(claude -p --allowedTools "$job_tools" --output-format json --permission-mode acceptEdits \
       ${SHIPMATE_VOICE_CLAUDE_ARGS:-} "$prompt" 2>"$jdir/err")"; then
     result="$(printf '%s' "$out" | json_get result)"; status="done"
     if [ -z "$result" ]; then result="Finished, but no summary came back."; fi

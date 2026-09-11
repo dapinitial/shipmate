@@ -27,7 +27,7 @@ by hand. Setup in **[apple-shortcut.md](apple-shortcut.md)**.
 | *"deploy panogram"* | **Plan only.** Speaks the plan + monthly cost. Changes nothing. |
 | *"what will that cost?"* (any follow-up) | Continues the **same session** — it remembers the plan. |
 | *"…confirm"* / *"do it"* / *"send it"* / *"ship it"* | Executes the plan (still pauses on irreversible steps). |
-| *"work on adding dark mode to panogram"* | **Background agent job.** Replies in 2 seconds, works for as long as it takes, pings your phone when done. Also: *"have an agent …"*, *"… in the background"*. |
+| *"work on adding dark mode to panogram"* | **Background agent job.** Replies in 2 seconds, works for as long as it takes, pings your phone when done. Workers run with a fixed allowlist (branch, edit, build, test) that contains no `git push` and no provider CLI, so nothing they do can reach production; merging and deploying pass back through you. Also: *"have an agent …"*, *"… in the background"*. |
 | *"counsel on whether we should move to Vercel"* | **Deliberate** (read-only, never acts). Toggle off (default): the default Anthropic model answers. Toggle on: a multi-model panel answers in parallel and a chair synthesizes, naming the dissent. Full transcript lands in `~/.shipmate/voice/last-counsel.txt`. |
 | *"counsel on"* / *"counsel off"* | Flip the deliberation toggle. |
 | *"status"* / *"how's it going?"* | Jobs (running/done) **and** each project's live production deploy phase. |
