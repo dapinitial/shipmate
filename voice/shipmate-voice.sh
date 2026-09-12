@@ -20,6 +20,7 @@ set -euo pipefail
 VOICE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SELF="$VOICE_DIR/$(basename "${BASH_SOURCE[0]}")"
 . "$VOICE_DIR/lib/phrase.sh"
+. "$VOICE_DIR/lib/gate.sh"
 . "$VOICE_DIR/../skills/deploy/lib/json.sh"
 
 # Optional config (non-secret): export SHIPMATE_NTFY_TOPIC etc. See README.md.
@@ -69,6 +70,11 @@ Machine interface (no phrase parsing — used by mcp/shipmate-mcp.js):
   --rollback <project|-> [--yes] | --doctor       lifecycle + health
   --flush-queue                                   replay queued dead-zone intents
   --watchdog                                      probe fleet hosts; notify on transitions
+  --verify-live <project-dir> <sha>               push one line when that commit's deploy is live
+
+The gate: execute turns consume a single-use grant minted by a plan for the same project within
+SHIPMATE_PLAN_TTL seconds (default 600). Without one the turn runs as a plan, is read back, and
+arms the grant — the next "ship it" (spoken, or the 🚀 button on the push) executes it.
 
 Environment (put exports in ~/.shipmate/voice.env):
   SHIPMATE_SITES_ROOT    where projects live (default ~/Sites)
@@ -79,6 +85,9 @@ Environment (put exports in ~/.shipmate/voice.env):
                          npm/npx/node and friends — no push, no doctl/vercel/gh)
   SHIPMATE_NTFY_URL      ntfy server (default https://ntfy.sh)
   SHIPMATE_VOICE_CLAUDE_ARGS   extra args appended to every claude invocation
+  SHIPMATE_PLAN_GRANT    grant file shared with the MCP server (default ~/.shipmate/mcp/plan-grant.json)
+  SHIPMATE_PLAN_TTL      seconds a plan stays armed (default 600)
+  SHIPMATE_VERIFY_TIMEOUT  seconds to wait for a deploy to go live before giving up (default 900)
 EOF
 }
 
@@ -96,15 +105,27 @@ clip() {
 }
 
 # notify <message> — best-effort push (ntfy → phone/CarPlay) + local notification. Never fails.
-notify() {
-  local msg="$1"
+notify() { # <message> [ntfy Actions header] — the phone is the channel; no Mac notification
+  local msg="$1" actions="${2:-}"
   if [ -n "${SHIPMATE_NTFY_TOPIC:-}" ] && command -v curl >/dev/null 2>&1; then
-    curl -fsS -m 10 -H "Title: shipmate" -d "$msg" \
+    curl -fsS -m 10 -H "Title: shipmate" ${actions:+-H "Actions: $actions"} -d "$msg" \
       "${SHIPMATE_NTFY_URL:-https://ntfy.sh}/$SHIPMATE_NTFY_TOPIC" >/dev/null 2>&1 || true
   fi
-  if command -v osascript >/dev/null 2>&1; then
-    osascript -e "display notification \"${msg//\"/}\" with title \"shipmate\"" >/dev/null 2>&1 || true
-  fi
+}
+
+tailnet_ip() { # this host's Tailscale address (100.64.0.0/10), else empty
+  ifconfig 2>/dev/null | awk '$1=="inet" && $2 ~ /^100\./ {split($2,o,"."); if (o[2]>=64 && o[2]<=127) {print $2; exit}}'
+}
+
+# notify_plan <project-name> <plan text> <nonce> — push the plan with a 🚀 Ship it button that
+# hits the tailnet-only server (/ship/<nonce>). Forgot to say "ship it"? Tap it. The grant is
+# single-use and expires, so a stale tap does nothing.
+notify_plan() {
+  local ip actions=""
+  ip="$(tailnet_ip)"
+  [ -n "$ip" ] && [ -n "$3" ] && actions="http, 🚀 Ship it, http://$ip:${SHIPMATE_ONBOARD_PORT:-8790}/ship/$3, method=POST, clear=true"
+  notify "Plan for $1 — $(printf '%s' "$2" | clip 500)" "$actions"
+  : > "$STATE_DIR/last-turn.pushed"
 }
 
 # resolve_project lives in lib/phrase.sh (tested); it reads SITES_ROOT and the aliases file.
@@ -124,11 +145,22 @@ project_or_default() {
 turn() { # <phrase> <mode:plan|execute> <project dir>
   local phrase="$1" mode="$2" project="$3"
   local sid="" old_project="" perm prompt out result new_sid err exec_tools="" approve_sh
+  local pname downgraded="" nonce head_before="" head_after=""
+  pname="$(basename "$project")"
+  # The gate: an execute turn must consume a live grant minted by a plan for this project.
+  # Otherwise it becomes a plan — read back, with the cost — and mints the grant the next
+  # "ship it" will consume. Enforced here, so every mouth (Siri, Claude app, terminal) gets it.
+  if [ "$mode" = "execute" ] && ! downgraded="$(gate_take "$pname")"; then
+    mode="plan"
+  else
+    downgraded=""
+  fi
   if [ -f "$STATE_DIR/session.id" ]; then sid="$(cat "$STATE_DIR/session.id")"; fi
   if [ -f "$STATE_DIR/session.project" ]; then old_project="$(cat "$STATE_DIR/session.project")"; fi
   # A different project means a different cwd — start a fresh session there.
   if [ -n "$sid" ] && [ "$old_project" != "$project" ]; then sid=""; fi
   cd "$project" 2>/dev/null || { speak "I can't find the project directory for $(basename "$project")."; return 1; }
+  head_before="$(git rev-parse HEAD 2>/dev/null || true)"
 
   if [ "$mode" = "execute" ]; then
     perm="acceptEdits"
@@ -162,8 +194,53 @@ turn() { # <phrase> <mode:plan|execute> <project dir>
     printf '%s' "$new_sid" > "$STATE_DIR/session.id"
     printf '%s' "$project" > "$STATE_DIR/session.project"
   fi
+  if [ "$mode" = "plan" ]; then
+    # Read back, then arm: the next "ship it" (spoken, or tapped on the push) executes this.
+    nonce="$(gate_mint "$pname")"
+    if [ -n "$downgraded" ]; then
+      result="$(gate_reason_spoken "$downgraded" "$pname") $result Say ship it to do it."
+    fi
+    notify_plan "$pname" "$result" "$nonce"
+  else
+    # Prove it: a push that reached origin becomes a deployment we can watch. Deterministic —
+    # no model in the loop — and delivered as a push when the deploy is actually live.
+    head_after="$(git rev-parse HEAD 2>/dev/null || true)"
+    if [ -n "$head_after" ] && [ "$head_after" != "$head_before" ] && [ -f "$project/.do/app.yaml" ] \
+       && ! git status -sb 2>/dev/null | head -1 | grep -q 'ahead'; then
+      nohup bash "$SELF" --verify-live "$project" "$head_after" >/dev/null 2>&1 &
+    fi
+  fi
   if [ -n "$result" ]; then printf '%s' "$result" | clip 1500
   else speak "Done, but Claude returned no summary. Check the Mac."; fi
+}
+
+# verify_live <project dir> <sha> — wait for the deployment of <sha> to go ACTIVE (or fail), then
+# push one line: what's live, or what to say to roll back. Never speaks; always pushes.
+verify_live() {
+  local project="$1" sha="$2" short name id url line phase waited=0 limit="${SHIPMATE_VERIFY_TIMEOUT:-900}" code
+  short="$(printf '%s' "$sha" | cut -c1-7)"; name="$(basename "$project")"
+  command -v doctl >/dev/null 2>&1 || return 0
+  id="$(doctl apps list --format ID,Spec.Name --no-header 2>/dev/null \
+        | awk -v n="$(sed -nE 's/^name:[[:space:]]*//p' "$project/.do/app.yaml" | head -1)" '$2==n{print $1}')"
+  [ -n "$id" ] || return 0
+  while [ "$waited" -lt "$limit" ]; do
+    line="$(doctl apps list-deployments "$id" --format Phase,Cause --no-header 2>/dev/null | grep -F "$short" | head -1)"
+    phase="$(printf '%s' "$line" | awk '{print $1}')"
+    case "$phase" in
+      ACTIVE)
+        url="$(doctl apps get "$id" --format LiveURL --no-header 2>/dev/null)"
+        [ -n "$url" ] || url="$(doctl apps get "$id" --format DefaultIngress --no-header 2>/dev/null)"
+        code="$(curl -s -m 15 -o /dev/null -w '%{http_code}' "$url" 2>/dev/null || echo 000)"
+        if [ "$code" = 200 ]; then notify "✅ $name is live: $short — $url"
+        else notify "⚠️ $name: deploy $short is ACTIVE but $url answered HTTP $code — say 'roll back $name, confirm' if it looks wrong."; fi
+        return 0 ;;
+      ERROR|CANCELED)
+        notify "❌ $name: deploy of $short $phase — the previous version is still live. Say 'roll back $name, confirm' to be sure, or fix and ship again."
+        return 0 ;;
+    esac
+    sleep 20; waited=$((waited + 20))
+  done
+  notify "⏳ $name: deploy of $short still not live after $((limit / 60)) minutes — check the dashboard."
 }
 
 # ---- counsel: multi-model deliberation (toggle, default OFF) ------------------------------
@@ -263,7 +340,7 @@ intent_run() { # <dir> — execute the stored intent; mark done; push the result
     *)       printf 'unknown intent verb %s' "$verb" > "$d/out" ;;
   esac
   : > "$d/done"
-  if [ -f "$d/detached" ]; then
+  if [ -f "$d/detached" ] && ! [ "$STATE_DIR/last-turn.pushed" -nt "$d/verb" ]; then
     notify "shipmate: $(clip 400 < "$d/out")"
   fi
 }
@@ -283,6 +360,7 @@ run_or_queue() {
   fi
   d="$STATE_DIR/turns/$(date +%s)-$$"
   intent_write "$d" "$verb" "$mode" "$project" "$text"
+  if [ "${SHIPMATE_FORCE_DETACH:-}" = 1 ]; then : > "$d/detached"; fi   # nobody listening: push the result
   nohup bash "$SELF" --intent-runner "$d" >/dev/null 2>&1 &
   budget="${SHIPMATE_TURN_BUDGET:-25}"
   while [ "$waited" -lt "$budget" ]; do
@@ -509,6 +587,13 @@ verb_status() {
   done <<EOF
 $plist
 EOF
+  if [ -f "$GATE_FILE" ]; then
+    local g gp
+    gp="$(gate_field project)"
+    if g="$(gate_peek "$gp")"; then
+      line="$line A plan for $gp is waiting for ship it, $(( $(printf '%s' "$g" | awk '{print $3}') / 60 )) minutes left."
+    fi
+  fi
   if [ -n "$line" ]; then speak "$(printf '%s' "$line" | clip 1200)"
   else speak "No jobs yet. Say 'work on' something to start one."; fi
 }
@@ -602,6 +687,7 @@ case "${1:-}" in
     verb_rollback "$PROJ" "$MODE"; exit $? ;;
   --doctor)   verb_doctor; exit 0 ;;
   --watchdog) verb_watchdog; exit 0 ;;
+  --verify-live) verify_live "$2" "$3"; exit 0 ;;
   --log)
     PROJ="${2:-}"; shift 2
     PUB="plan"; if [ "${1:-}" = "--publish" ]; then PUB="execute"; shift; fi

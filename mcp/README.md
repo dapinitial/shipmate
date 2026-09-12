@@ -99,7 +99,7 @@ proceed; creating new billed resources, resizing, or deleting stops and describe
 
 ## Roadmap (Phase 4 of docs/ROADMAP.md)
 
-- [x] v0: stdio server over the bridge's machine interface; two-phase plan/execute in code.
+- [x] v0: stdio server over the bridge's machine interface; two-phase plan/execute in code — the grant now lives in `voice/lib/gate.sh` inside the bridge, so Siri, this server and the terminal share one gate (a plan arms it, an execute consumes it, 10-minute TTL, single use). The onboard server's tailnet-only `POST /ship/<nonce>` is the 🚀 button on a plan push.
 - [x] Streamable HTTP transport + Tailscale Funnel + token-in-path; registered as a claude.ai
       custom connector.
 - [x] **Confirmed: the Claude iOS app's voice mode calls these tools.** The phone app is the

@@ -22,7 +22,7 @@
  */
 'use strict';
 
-const { execFile } = require('child_process');
+const { execFile, spawn } = require('child_process');
 const crypto = require('crypto');
 const fs = require('fs');
 const http = require('http');
@@ -54,21 +54,11 @@ function bridge(args) {
 
 // ---- two-phase gate ------------------------------------------------------------------
 
-function grantPlan(project) {
-  fs.mkdirSync(STATE_DIR, { recursive: true });
-  fs.writeFileSync(PLAN_GRANT, JSON.stringify({ project, ts: Date.now() }), { mode: 0o600 });
-}
-
-function takeGrant(project) { // valid + same project → consume it (single use); else reason string
-  let g;
-  try { g = JSON.parse(fs.readFileSync(PLAN_GRANT, 'utf8')); }
-  catch { return 'No plan exists. Call shipmate_plan first — execute is only unlocked by a fresh plan.'; }
-  if (Date.now() - g.ts > PLAN_TTL_MS)
-    return 'The last plan is older than 10 minutes. Call shipmate_plan again to see (and unlock) what would happen.';
-  if ((g.project || '-') !== (project || '-'))
-    return `The last plan was for project "${g.project}", not "${project}". Plan this project first.`;
-  try { fs.unlinkSync(PLAN_GRANT); } catch {}
-  return null;
+// The grant itself (mint on plan, consume on execute) lives in voice/lib/gate.sh and runs
+// inside the bridge, so every channel shares it. This server only reads the grant file for the
+// Ship-it button: a valid nonce on a tailnet-only POST runs "ship it" for the armed project.
+function readGrant() {
+  try { return JSON.parse(fs.readFileSync(PLAN_GRANT, 'utf8')); } catch { return null; }
 }
 
 // ---- tools ---------------------------------------------------------------------------
@@ -90,9 +80,10 @@ const TOOLS = [
   },
   {
     name: 'shipmate_execute',
-    description: 'Execute the previously planned request. Refuses unless shipmate_plan ran for ' +
-      'the same project within the last 10 minutes (single-use grant). Cost-neutral steps ' +
-      'proceed; new spend, resizes, and deletions still stop and describe themselves.',
+    description: 'Execute the previously planned request. The engine enforces the gate: without ' +
+      'a single-use grant from a shipmate_plan for the same project in the last 10 minutes, the ' +
+      'call runs as a plan instead, is read back, and arms the grant — call execute again to do ' +
+      'it. Cost-neutral steps proceed; new spend, resizes, and deletions still stop and describe themselves.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -205,16 +196,12 @@ async function callTool(name, args) {
     ({ content: [{ type: 'text', text }], ...(isError ? { isError: true } : {}) });
 
   switch (name) {
-    case 'shipmate_plan': {
-      const r = await bridge(['--turn', 'plan', proj, a.request]);
-      if (!r.isError) grantPlan(a.project || '-');
-      return wrap(r);
-    }
-    case 'shipmate_execute': {
-      const refusal = takeGrant(a.project || '-');
-      if (refusal) return wrap({ text: refusal, isError: true });
+    case 'shipmate_plan':
+      return wrap(await bridge(['--turn', 'plan', proj, a.request]));
+    case 'shipmate_execute':
+      // The plan→execute grant is minted and consumed inside the bridge (voice/lib/gate.sh),
+      // so Siri, this server and the terminal share one gate instead of three.
       return wrap(await bridge(['--turn', 'execute', proj, a.request]));
-    }
     case 'shipmate_status':
       return wrap(await bridge(['--status-report']));
     case 'shipmate_task_start':
@@ -502,6 +489,21 @@ async function serveOnboard(port) {
     // Tap-to-confirm: ntfy action buttons land here. Tailnet-only by construction —
     // this server never binds anywhere else — so reading the notification is not
     // enough to approve; you must be one of the user's own devices.
+    // The 🚀 Ship it button on a plan push. Same trust model as approve: tailnet-only server,
+    // single-use grant, 10-minute TTL — a stale or forged tap does nothing.
+    const sh = url.match(/^\/ship\/([a-f0-9]{16,64})$/);
+    if (sh) {
+      const done = (code, msg) => { res.writeHead(code, { 'Content-Type': 'text/plain; charset=utf-8' }); res.end(msg); };
+      if (req.method !== 'POST') return done(405, 'POST only');
+      const g = readGrant();
+      if (!g || g.nonce !== sh[1]) return done(404, 'no armed plan for that button (already shipped, or expired)');
+      if (Date.now() - g.ts > PLAN_TTL_MS) return done(410, 'that plan expired — ask for it again');
+      const child = spawn('bash', [BRIDGE, 'ship it'],
+        { env: { ...process.env, SHIPMATE_FORCE_DETACH: '1' }, detached: true, stdio: 'ignore' });
+      child.unref();
+      log(`ship-it tap for ${g.project} (nonce ${sh[1].slice(0, 8)}…)`);
+      return done(200, `🚀 Shipping ${g.project} — I'll ping you when it's live.`);
+    }
     const ap = url.match(/^\/(approve|deny)\/([a-f0-9]{16,64})$/);
     if (ap) {
       const file = path.join(APPROVALS, ap[2]);

@@ -26,7 +26,8 @@ by hand. Setup in **[apple-shortcut.md](apple-shortcut.md)**.
 |---|---|
 | *"deploy panogram"* | **Plan only.** Speaks the plan + monthly cost. Changes nothing. |
 | *"what will that cost?"* (any follow-up) | Continues the **same session** — it remembers the plan. |
-| *"…confirm"* / *"do it"* / *"send it"* / *"ship it"* | Executes the plan (still pauses on irreversible steps). |
+| *"…confirm"* / *"do it"* / *"send it"* / *"ship it"* | Executes the plan — **only** by consuming a single-use grant that a plan for the same project minted in the last 10 minutes. No grant? The phrase runs as a plan instead, is read back with the cost, and arms the grant; the next *"ship it"* does it. Every plan also pushes to your phone with a **🚀 Ship it** button (tailnet-only, same trust as Approve/Deny), so forgetting the words costs a tap, not the change. |
+| *(after a ship)* | The bridge watches the deploy of that commit and pushes one line when it is actually live (HTTP 200 on the live URL), or how to roll back if it failed. No model in the loop. |
 | *"work on adding dark mode to panogram"* | **Background agent job.** Replies in 2 seconds, works for as long as it takes, pings your phone when done. Workers run with a fixed allowlist (branch, edit, build, test) that contains no `git push` and no provider CLI, so nothing they do can reach production; merging and deploying pass back through you. Also: *"have an agent …"*, *"… in the background"*. |
 | *"counsel on whether we should move to Vercel"* | **Deliberate** (read-only, never acts). Toggle off (default): the default Anthropic model answers. Toggle on: a multi-model panel answers in parallel and a chair synthesizes, naming the dissent. Full transcript lands in `~/.shipmate/voice/last-counsel.txt`. |
 | *"counsel on"* / *"counsel off"* | Flip the deliberation toggle. |
