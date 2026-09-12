@@ -43,7 +43,8 @@ inject env safely), **url** (the live URL), **allowlist/auth** (wire the app's s
 ## Map
 - `skills/deploy/SKILL.md` — the agent runbook (multi-provider, safety, DNS, post-deploy)
 - `skills/deploy/bin/` — `doctor.sh`, `do-provision.sh`, `do-app.sh`, `vercel-provision.sh`,
-  `supabase-allowlist.sh`, `request-approval.sh` (tap-to-confirm for new spend)
+  `supabase-allowlist.sh`, `request-approval.sh` (tap-to-confirm for new spend),
+  `deploy-card.sh` (derived "## Deploy (shipmate)" block for a repo's CLAUDE.md + fleet drift check)
 - `skills/deploy/lib/envspec.sh` — the tested, security-critical env classifier
 - `tests/` — run every `tests/test_*.sh` · `voice/` — the voice bridge (bridge + tested phrase
   parser in `voice/lib/`) · `mcp/` — the MCP server over the same engine · `docs/` —
@@ -51,7 +52,7 @@ inject env safely), **url** (the live URL), **allowlist/auth** (wire the app's s
 - `install.sh` — link skills into `~/.claude/skills` + enable the secret hook
 
 ## Before you commit
-- [ ] every `tests/test_*.sh` green (env classifier + voice phrase parser)
+- [ ] every `tests/test_*.sh` green (env classifier, voice phrase parser, deploy card)
 - [ ] `bash skills/deploy/bin/doctor.sh` sane on your machine
 - [ ] no secret value in any committed file (the pre-commit hook enforces this)
 - [ ] no hardcoded usernames/refs — derived from context

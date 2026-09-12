@@ -41,6 +41,15 @@ else
   printf '  \033[33m•\033[0m Supabase token: set SUPABASE_ACCESS_TOKEN when you need auth wiring\n'
 fi
 
+# Fleet drift: every repo under the sites root with a .do/app.yaml must name a live app and push
+# to the remote that app deploys from (the mistakes that turn "ship it" into a no-op).
+CARD="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/deploy-card.sh"
+ROOT="${SHIPMATE_SITES_ROOT:-$HOME/Sites}"
+if [ -d "$ROOT" ] && ls "$ROOT"/*/.do/app.yaml >/dev/null 2>&1; then
+  echo "fleet ($ROOT):"
+  if bash "$CARD" --check-all "$ROOT"; then ok=$((ok+1)); else bad=$((bad+1)); fi
+fi
+
 echo
 if [ "$bad" -eq 0 ]; then printf '\033[32m✓ ready — %s checks passed\033[0m\n' "$ok"
 else printf '\033[31m✗ %s issue(s)\033[0m, %s ok — fix the ✗ lines above\n' "$bad" "$ok"; fi
