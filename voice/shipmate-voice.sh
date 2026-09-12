@@ -226,15 +226,25 @@ turn() { # <phrase> <mode:plan|execute> <project dir>
 # verify_live <project dir> <sha> — wait for the deployment of <sha> to go ACTIVE (or fail), then
 # push one line: what's live, or what to say to roll back. Never speaks; always pushes.
 verify_live() {
-  local project="$1" sha="$2" short name id url line phase waited=0 limit="${SHIPMATE_VERIFY_TIMEOUT:-900}" code expect
+  local project="$1" sha="$2" short name id url phase waited=0 limit="${SHIPMATE_VERIFY_TIMEOUT:-900}" code expect
   short="$(printf '%s' "$sha" | cut -c1-7)"; name="$(basename "$project")"
   command -v doctl >/dev/null 2>&1 || return 0
   id="$(doctl apps list --format ID,Spec.Name --no-header 2>/dev/null \
         | awk -v n="$(sed -nE 's/^name:[[:space:]]*//p' "$project/.do/app.yaml" | head -1)" '$2==n{print $1}')"
   [ -n "$id" ] || return 0
   while [ "$waited" -lt "$limit" ]; do
-    line="$(doctl apps list-deployments "$id" --format Phase,Cause --no-header 2>/dev/null | grep -F "$short" | head -1)"
-    phase="$(printf '%s' "$line" | awk '{print $1}')"
+    # Match the deployment by the commit it actually built (source_commit_hash), not by the
+    # "Cause" text — a manual or retried deployment of the same commit has a different cause.
+    phase="$(doctl apps list-deployments "$id" -o json 2>/dev/null | python3 -c '
+import sys, json
+sha = sys.argv[1]
+try: ds = json.load(sys.stdin)
+except Exception: ds = []
+for d in ds:
+    hashes = [svc.get("source_commit_hash", "") for svc in (d.get("services") or []) + (d.get("static_sites") or [])]
+    if any(h.startswith(sha) for h in hashes):
+        print(d.get("phase", "")); break
+' "$sha" 2>/dev/null)"
     case "$phase" in
       ACTIVE)
         # The address people actually open: the PRIMARY domain from the spec, else the app's
