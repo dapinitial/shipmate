@@ -228,9 +228,12 @@ verify_live() {
     phase="$(printf '%s' "$line" | awk '{print $1}')"
     case "$phase" in
       ACTIVE)
-        url="$(doctl apps get "$id" --format LiveURL --no-header 2>/dev/null)"
-        [ -n "$url" ] || url="$(doctl apps get "$id" --format DefaultIngress --no-header 2>/dev/null)"
-        code="$(curl -s -m 15 -o /dev/null -w '%{http_code}' "$url" 2>/dev/null || echo 000)"
+        # The address people actually open: the PRIMARY domain from the spec, else the app's
+        # default ingress. doctl prints "<nil>" for an unset column — treat that as empty.
+        url="$(awk '/^ *- *domain:/{d=$3} /type: *PRIMARY/{print d; exit}' "$project/.do/app.yaml" 2>/dev/null)"
+        [ -n "$url" ] && url="https://$url"
+        [ -n "$url" ] || url="$(doctl apps get "$id" --format DefaultIngress --no-header 2>/dev/null | grep -v '<nil>')"
+        code="$(curl -s -m 15 -o /dev/null -w '%{http_code}' "$url" 2>/dev/null)"; [ -n "$code" ] || code=000
         if [ "$code" = 200 ]; then notify "✅ $name is live: $short — $url"
         else notify "⚠️ $name: deploy $short is ACTIVE but $url answered HTTP $code — say 'roll back $name, confirm' if it looks wrong."; fi
         return 0 ;;
