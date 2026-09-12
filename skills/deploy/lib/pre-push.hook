@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+# shipmate pre-push guard — installed per clone by skills/deploy/bin/install-hooks.sh.
+# Refuses a push that (1) targets any remote but the project's deploy remote, (2) touches a
+# protected path, or (3) changes more files than the project's cap. Reads <repo>/.shipmate.yml;
+# sane defaults without it. Structural: it does not matter who or what runs `git push`.
+# Bypass, deliberately and visibly:  SHIPMATE_ALLOW=1 git push …   (never --no-verify by an agent)
+set -uo pipefail
+remote="$1"; url="${2:-}"
+[ "${SHIPMATE_ALLOW:-}" = 1 ] && exit 0
+LIB="__SHIPMATE_LIB__"
+if [ -f "$LIB/project.sh" ]; then . "$LIB/project.sh"; else
+  echo "shipmate pre-push: library missing at $LIB — reinstall with install-hooks.sh (allowing push)"; exit 0; fi
+root="$(git rev-parse --show-toplevel)"
+want="$(project_deploy_remote "$root")"
+if [ "$remote" != "$want" ] && [ "$url" != "$(git remote get-url "$want" 2>/dev/null)" ]; then
+  echo "✗ shipmate: this project deploys from '$want'; refusing to push to '$remote' ($url)."
+  echo "  If you really mean it: SHIPMATE_ALLOW=1 git push $remote …"
+  exit 1
+fi
+cap="$(project_max_files "$root")"; bad=0; z="0000000000000000000000000000000000000000"
+while read -r lref lsha rref rsha; do
+  [ -n "$lsha" ] && [ "$lsha" != "$z" ] || continue         # a delete: nothing to inspect
+  if [ "$rsha" = "$z" ]; then base="$(git merge-base "$lsha" "$want/$(project_branch "$root")" 2>/dev/null || echo "$lsha^")"
+  else base="$rsha"; fi
+  files="$(git diff --name-only "$base" "$lsha" 2>/dev/null)"
+  n="$(printf '%s\n' "$files" | awk 'NF' | wc -l | tr -d ' ')"
+  if [ "$n" -gt "$cap" ]; then
+    echo "✗ shipmate: pushing ${rref#refs/heads/} would change $n files; this project's cap is $cap (.shipmate.yml max_files)."
+    echo "  Split the change, or push deliberately: SHIPMATE_ALLOW=1 git push …"; bad=1
+  fi
+  while IFS= read -r f; do
+    [ -n "$f" ] || continue
+    if project_is_protected "$root" "$f"; then
+      echo "✗ shipmate: '$f' is a protected path (.shipmate.yml protected / secrets default); refusing to push it."; bad=1
+    fi
+  done <<EOF
+$files
+EOF
+done
+exit $bad

@@ -21,6 +21,7 @@ VOICE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SELF="$VOICE_DIR/$(basename "${BASH_SOURCE[0]}")"
 . "$VOICE_DIR/lib/phrase.sh"
 . "$VOICE_DIR/lib/gate.sh"
+. "$VOICE_DIR/../skills/deploy/lib/project.sh"
 . "$VOICE_DIR/../skills/deploy/lib/json.sh"
 
 # Optional config (non-secret): export SHIPMATE_NTFY_TOPIC etc. See README.md.
@@ -150,8 +151,16 @@ turn() { # <phrase> <mode:plan|execute> <project dir>
   # The gate: an execute turn must consume a live grant minted by a plan for this project.
   # Otherwise it becomes a plan — read back, with the cost — and mints the grant the next
   # "ship it" will consume. Enforced here, so every mouth (Siri, Claude app, terminal) gets it.
-  if [ "$mode" = "execute" ] && ! downgraded="$(gate_take "$pname")"; then
-    mode="plan"
+  if [ "$mode" = "execute" ]; then
+    # Preflight first (deterministic, seconds): wrong branch, behind origin, a protected file
+    # in the tree, no guard, stale app spec. It refuses BEFORE the grant is consumed, so the
+    # plan stays armed — fix the reason and say "ship it" again.
+    local pf
+    if ! pf="$(bash "$VOICE_DIR/../skills/deploy/bin/preflight.sh" "$project" 2>&1)"; then
+      speak "Preflight stopped the ship for $pname: $(printf '%s' "$pf" | clip 300) The plan is still armed — fix that and say ship it."
+      return 1
+    fi
+    if ! downgraded="$(gate_take "$pname")"; then mode="plan"; fi
   else
     downgraded=""
   fi
@@ -168,7 +177,7 @@ turn() { # <phrase> <mode:plan|execute> <project dir>
     # still needs on-screen approval. Override the list via SHIPMATE_VOICE_EXECUTE_TOOLS.
     approve_sh="$VOICE_DIR/../skills/deploy/bin/request-approval.sh"
     exec_tools="${SHIPMATE_VOICE_EXECUTE_TOOLS:-Bash(git:*),Bash(npm:*),Bash(doctl:*),Bash(vercel:*),Bash(gh:*)},Bash($approve_sh:*)"
-    prompt="Spoken request (hands-free driver; reply short enough to read aloud, plain prose, no markdown): \"$phrase\". Mode=EXECUTE: the user has explicitly confirmed — act now, don't re-ask. Cost-neutral steps (git merge, build, push, redeploying an existing app) proceed without hesitation; always state the monthly cost in your reply. For a step that creates NEW billed resources or raises cost (new app, resize, scale): request an out-of-band tap by running $approve_sh 'one-line description with the exact monthly cost' — proceed only if it prints APPROVED; on DENIED or TIMEOUT, stop and say so. NEVER delete resources or user data from a voice session. Push to 'origin' (the remote the app deploys from) unless the project says otherwise. Report only what you verified: after a push run 'git status -sb' and confirm 'ahead' is gone before saying it pushed or deployed; if a push or command fails, say so plainly and what to do next."
+    prompt="Spoken request (hands-free driver; reply short enough to read aloud, plain prose, no markdown): \"$phrase\". Mode=EXECUTE: the user has explicitly confirmed — act now, don't re-ask. Cost-neutral steps (git merge, build, push, redeploying an existing app) proceed without hesitation; always state the monthly cost in your reply. For a step that creates NEW billed resources or raises cost (new app, resize, scale): request an out-of-band tap by running $approve_sh 'one-line description with the exact monthly cost' — proceed only if it prints APPROVED; on DENIED or TIMEOUT, stop and say so. NEVER delete resources or user data from a voice session. Push to 'origin' (the remote the app deploys from) unless the project says otherwise. Report only what you verified: after a push run 'git status -sb' and confirm 'ahead' is gone before saying it pushed or deployed; if a push or command fails, say so plainly and what to do next. If the shipmate pre-push guard refuses a push (wrong remote, protected path, too many files), never bypass it (no --no-verify, no SHIPMATE_ALLOW) — report its reason verbatim."
   else
     perm="plan"
     prompt="Spoken request (hands-free driver; reply short enough to read aloud, plain prose, no markdown): \"$phrase\". Mode=PLAN: say what you would do and the exact monthly cost. Create, change, charge, or publish NOTHING."
@@ -217,7 +226,7 @@ turn() { # <phrase> <mode:plan|execute> <project dir>
 # verify_live <project dir> <sha> — wait for the deployment of <sha> to go ACTIVE (or fail), then
 # push one line: what's live, or what to say to roll back. Never speaks; always pushes.
 verify_live() {
-  local project="$1" sha="$2" short name id url line phase waited=0 limit="${SHIPMATE_VERIFY_TIMEOUT:-900}" code
+  local project="$1" sha="$2" short name id url line phase waited=0 limit="${SHIPMATE_VERIFY_TIMEOUT:-900}" code expect
   short="$(printf '%s' "$sha" | cut -c1-7)"; name="$(basename "$project")"
   command -v doctl >/dev/null 2>&1 || return 0
   id="$(doctl apps list --format ID,Spec.Name --no-header 2>/dev/null \
@@ -230,11 +239,14 @@ verify_live() {
       ACTIVE)
         # The address people actually open: the PRIMARY domain from the spec, else the app's
         # default ingress. doctl prints "<nil>" for an unset column — treat that as empty.
-        url="$(awk '/^ *- *domain:/{d=$3} /type: *PRIMARY/{print d; exit}' "$project/.do/app.yaml" 2>/dev/null)"
-        [ -n "$url" ] && url="https://$url"
+        url="$(project_health_url "$project")"
+        [ -n "$url" ] || { url="$(awk '/^ *- *domain:/{d=$3} /type: *PRIMARY/{print d; exit}' "$project/.do/app.yaml" 2>/dev/null)"; [ -n "$url" ] && url="https://$url"; }
         [ -n "$url" ] || url="$(doctl apps get "$id" --format DefaultIngress --no-header 2>/dev/null | grep -v '<nil>')"
         code="$(curl -s -m 15 -o /dev/null -w '%{http_code}' "$url" 2>/dev/null)"; [ -n "$code" ] || code=000
-        if [ "$code" = 200 ]; then notify "✅ $name is live: $short — $url"
+        expect="$(project_expect_text "$project")"
+        if [ "$code" = 200 ] && [ -n "$expect" ] && ! curl -s -m 15 "$url" 2>/dev/null | grep -q -F -- "$expect"; then
+          notify "⚠️ $name: deploy $short is ACTIVE and $url answers 200, but the page doesn't contain \"$expect\" — say 'roll back $name, confirm' if that's wrong."
+        elif [ "$code" = 200 ]; then notify "✅ $name is live: $short — $url"
         else notify "⚠️ $name: deploy $short is ACTIVE but $url answered HTTP $code — say 'roll back $name, confirm' if it looks wrong."; fi
         return 0 ;;
       ERROR|CANCELED)

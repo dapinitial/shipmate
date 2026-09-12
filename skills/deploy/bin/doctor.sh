@@ -48,6 +48,7 @@ ROOT="${SHIPMATE_SITES_ROOT:-$HOME/Sites}"
 if [ -d "$ROOT" ] && ls "$ROOT"/*/.do/app.yaml >/dev/null 2>&1; then
   echo "fleet ($ROOT):"
   if bash "$CARD" --check-all "$ROOT"; then ok=$((ok+1)); else bad=$((bad+1)); fi
+  if bash "$(dirname "$CARD")/install-hooks.sh" --check-all "$ROOT"; then ok=$((ok+1)); else bad=$((bad+1)); fi
 fi
 
 echo
