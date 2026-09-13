@@ -543,8 +543,10 @@ dispatch_job() { # <task phrase> <project dir>
 
 job_runner() { # <job dir> — runs headless, writes result/status, pushes a notification
   local jdir="$1" task project prompt out result status
+  local start_branch=""
   task="$(cat "$jdir/task")"; project="$(cat "$jdir/project")"
   cd "$project" 2>/dev/null || { speak "I can't find the project directory for $(basename "$project")."; return 1; }
+  start_branch="$(git branch --show-current 2>/dev/null || true)"
   prompt="Background agent job; no human is watching, so never ask questions — decide and proceed. Task: \"$task\".
 Rules: work on a NEW git branch and never commit to or push the default branch (a push there can trigger a production deploy). Run the project's tests if it has any. NEVER deploy, publish, create infrastructure, or take any action that costs money — if the task needs that, prepare everything and stop. End your reply with 'SUMMARY:' followed by 2-3 plain sentences suitable to be read aloud."
   # Workers are untrusted by design: the allowlist lets them branch, edit, build and test, and
@@ -558,6 +560,17 @@ Rules: work on a NEW git branch and never commit to or push the default branch (
     if [ -z "$result" ]; then result="Finished, but no summary came back."; fi
   else
     result="The job hit an error: $(tail -n1 "$jdir/err" 2>/dev/null | clip 200)"; status="failed"
+  fi
+  # The worker branched; put the checkout back where the driver left it so the next "ship it"
+  # starts from the production branch (preflight insists on it). The job branch stays to merge.
+  local end_branch; end_branch="$(git branch --show-current 2>/dev/null || true)"
+  if [ -n "$start_branch" ] && [ "$end_branch" != "$start_branch" ]; then
+    if [ -z "$(git status --porcelain 2>/dev/null)" ] && git checkout -q "$start_branch" 2>/dev/null; then
+      result="$result Branch $end_branch has the work; the checkout is back on $start_branch."
+      printf '%s' "$end_branch" > "$jdir/branch"
+    else
+      result="$result Note: the checkout is still on $end_branch with uncommitted changes."
+    fi
   fi
   printf '%s' "$result" > "$jdir/result"
   printf '%s' "$status" > "$jdir/status"
