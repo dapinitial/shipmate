@@ -1,4 +1,4 @@
-# shipmate-mcp (v0 — stdio)
+# shipmate-mcp
 
 The shipmate engine as **MCP tools**, so any MCP client — Claude Code, and eventually the
 Claude apps through a remote connector — can drive deploys and background agent jobs. Voice
@@ -22,15 +22,36 @@ node mcp/shipmate-mcp.js --http 8788        # binds 127.0.0.1 ONLY
 tailscale funnel --bg 8788                  # public HTTPS via your tailnet name
 ```
 
-The endpoint is `https://<your-mac>.<tailnet>.ts.net/mcp/<token>` where `<token>` is a
-48-hex-char secret minted into `~/.shipmate/mcp/http-token` (0600) on first run. Every other
-path 404s. Add that URL at claude.ai → Settings → Connectors → **Add custom connector**.
+The endpoint is `https://<your-mac>.<tailnet>.ts.net/mcp`. Add it at claude.ai → Settings →
+Connectors → **Add custom connector**, and leave the sign-in option on **OAuth** (the default
+it detects). Claude registers itself, then sends you to shipmate's sign-in page.
 
-**Be clear-eyed about the trade:** the URL is a bearer secret for a server that can deploy
-your apps and start agent jobs. TLS terminates on your Mac (relays see ciphertext), execute
-stays behind the plan grant, but whoever holds the URL holds the keys. Treat it like a
-password; `tailscale funnel --https=443 off` kills public access instantly. A LaunchAgent +
-OAuth are the production path — this is the experiment path.
+**Signing in needs you, on your own devices.** The page shows a six-character code and pushes
+an **Approve / Deny** notification to your phone. The buttons call the onboarding server,
+which listens only on your tailnet, so reading the notification is not enough to approve. No
+phone handy? On the Mac:
+
+```bash
+node mcp/shipmate-mcp.js --approve-login ABC-123
+```
+
+What the server enforces (OAuth 2.1, per the MCP authorization spec):
+
+- **Discovery**: `/.well-known/oauth-protected-resource` and `/.well-known/oauth-authorization-server`;
+  a 401 from `/mcp` names the metadata URL.
+- **Registration** only for Claude's connector callbacks (`https://claude.ai|claude.com/api/mcp/auth_callback`)
+  and loopback (Claude Code). `SHIPMATE_OAUTH_REDIRECTS` adds others.
+- **Authorization code + PKCE (S256 only)**, codes single-use and 5 minutes long.
+- **Access tokens last 1 hour; refresh tokens 30 days and rotate.** A refresh token presented
+  twice revokes every token from that sign-in. Tokens are stored as SHA-256 hashes.
+- **Scopes**: `shipmate:read` (plan, status, doctor, counsel, results, rollback descriptions) and
+  `shipmate:execute` (everything that changes something). A read-only sign-in can't ship.
+- **Audit**: every registration, sign-in, refusal and revocation lands in `~/.shipmate/mcp/auth.log`.
+
+Admin on the host: `--grants` lists sign-ins, `--revoke-all` signs every client out.
+`tailscale funnel --https=443 off` removes public access entirely. The pre-OAuth URL token
+(`/mcp/<token>`) is revoked: the server deletes it on start and that path is a 404.
+`tests/test_mcp_auth.sh` runs a real server and attacks the boundary (53 assertions).
 
 ## Tools
 
@@ -105,6 +126,6 @@ proceed; creating new billed resources, resizing, or deleting stops and describe
 - [x] **Confirmed: the Claude iOS app's voice mode calls these tools.** The phone app is the
       conversational front-end; the Siri bridge is the wake-word/one-shot channel.
 - [ ] Run the HTTP server + funnel as a LaunchAgent (today it dies on reboot).
-- [ ] OAuth in place of the bearer URL.
+- [x] OAuth 2.1 in place of the bearer URL (PKCE, scopes, tailnet-tap sign-in, rotating refresh).
 - [x] Out-of-band confirm for billable steps: `request-approval.sh` + ntfy action buttons
       hitting the tailnet-only server (`/approve/<nonce>`, `/deny/<nonce>`); fails closed.
