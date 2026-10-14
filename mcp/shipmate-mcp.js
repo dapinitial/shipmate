@@ -9,7 +9,7 @@
  *     bearer token from this server's own authorization server (PKCE, dynamic registration
  *     limited to Claude callbacks + loopback, scopes shipmate:read / shipmate:execute, owner
  *     approval by a tailnet-only tap). See mcp/README.md.
- *   Admin (on the host):    --approve-login <CODE> · --deny-login <CODE> · --grants · --revoke-all
+ *   Admin (on the host):    --approve-login <CODE> · --deny-login <CODE> · --grants · --revoke-all · --revoke-client <id>
  *                           --enroll-passkey · --passkeys · --remove-passkey <id>
  *                           --enroll-totp · --totp-status · --remove-totp
  *
@@ -1261,9 +1261,16 @@ else if (argv[0] === '--enroll-passkey') {
   const db = oauthLoad(); const n = Object.keys(db.access).length + Object.keys(db.refresh).length;
   db.access = {}; db.refresh = {}; db.codes = {}; oauthSave(db); audit('revoke_all', { tokens: n });
   console.log(`revoked ${n} token(s); every client must sign in again`);
+} else if (argv[0] === '--revoke-client') {
+  const db = oauthLoad(), pre = String(argv[1] || '');
+  if (pre.length < 6) { console.log('usage: --revoke-client <client id prefix from --grants, 6+ chars>'); process.exit(1); }
+  let n = 0;
+  for (const k of ['access', 'refresh']) for (const h of Object.keys(db[k])) if (db[k][h].client_id.startsWith(pre)) { delete db[k][h]; n++; }
+  oauthSave(db); audit('revoke_client', { client: pre.slice(0, 8), tokens: n });
+  console.log(`revoked ${n} token(s) for client ${pre}…`);
 } else if (argv[0] === '--grants') {
   const db = oauthLoad(); const t = now();
-  const rows = Object.values(db.refresh).map((r) => `${(db.clients[r.client_id] || {}).name || '?'}  scope=${r.scope}  expires in ${Math.round((r.exp - t) / 86400)}d`);
+  const rows = Object.values(db.refresh).map((r) => `${r.client_id.slice(0, 8)}  ${(db.clients[r.client_id] || {}).name || '?'}  signed in ${new Date((r.exp - REFRESH_TTL_S) * 1000).toISOString().slice(0, 16).replace('T', ' ')}Z  scope=${r.scope}  expires in ${Math.round((r.exp - t) / 86400)}d`);
   console.log(rows.length ? rows.join('\n') : 'no active sign-ins');
 } else if (argv[0] === '--http') serveHttp(parseInt(argv[1], 10) || 8787);
 else if (argv[0] === '--onboard') serveOnboard(parseInt(argv[1], 10) || 8790);

@@ -166,8 +166,11 @@ async function signIn(clientId, scope, verdict = 'approved') {
   ok('revoked refresh kills access too', (await rpc(t5.access_token, 'tools/list', {})).status, 401);
   const s6 = await signIn(client, null);
   const t6 = await (await tok({ code: s6.loc.searchParams.get('code'), code_verifier: s6.verifier })).json();
+  ok('--grants shows the client id', execFileSync('node', [server, '--grants'], { env: process.env }).toString().includes(client.slice(0, 8)), true);
+  ok('--revoke-client', /^revoked [1-9]\d* token\(s\)/.test(execFileSync('node', [server, '--revoke-client', client.slice(0, 8)], { env: process.env }).toString()), true);
+  ok('client tokens dead', (await rpc(t6.access_token, 'tools/list', {})).status, 401);
   execFileSync('node', [server, '--revoke-all'], { env: process.env });
-  ok('--revoke-all', (await rpc(t6.access_token, 'tools/list', {})).status, 401);
+  ok('--revoke-all leaves nothing', execFileSync('node', [server, '--grants'], { env: process.env }).toString().trim(), 'no active sign-ins');
 
   console.log('passkeys:');
   const env = { ...process.env, SHIPMATE_PUBLIC_URL: base, SHIPMATE_NO_CLIPBOARD: '1' };
