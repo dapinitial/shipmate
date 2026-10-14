@@ -47,7 +47,17 @@ gather() { # <dir> — sets the FACT_* globals
     FACT_APP="$(sed -nE 's/^name:[[:space:]]*//p' "$dir/.do/app.yaml" | head -1)"
     FACT_APP_REPO="$(sed -nE 's/^[[:space:]]*repo:[[:space:]]*//p' "$dir/.do/app.yaml" | head -1)"
   fi
-  FACT_VERCEL=""; [ -d "$dir/.vercel" ] && FACT_VERCEL=yes
+  FACT_VERCEL=""; FACT_VNAME=""; FACT_VREPO=""; FACT_VBRANCH=""; FACT_VURL=""; FACT_VOK=""
+  if [ -f "$dir/.vercel/project.json" ] && [ ! -f "$dir/.do/app.yaml" ]; then
+    FACT_VERCEL=yes
+    FACT_VNAME="$(sed -nE 's/.*"projectName" *: *"([^"]*)".*/\1/p' "$dir/.vercel/project.json" | head -1)"
+    local raw; raw="$(bash "$(dirname "${BASH_SOURCE[0]}")/vercel-app.sh" status "$dir" 2>/dev/null || true)"
+    if printf '%s' "$raw" | grep -q '^app:'; then
+      FACT_VOK=yes
+      FACT_VNAME="$(printf '%s\n' "$raw" | sed -nE 's/^app: *([^ ]+).*/\1/p')"
+      FACT_VURL="$(printf '%s\n' "$raw" | sed -nE 's/^url: *//p')"
+    fi
+  fi
   if [ -n "$FACT_APP" ] && have_doctl; then
     local row id
     row="$(doctl apps list --format ID,Spec.Name,DefaultIngress --no-header 2>/dev/null \
@@ -90,7 +100,9 @@ card() {
     esac
     echo "- Voice: \"roll back $FACT_NAME, confirm\" reverts to the previous deployment; \"status\" reports the phase."
   elif [ -n "$FACT_VERCEL" ]; then
-    echo "- Vercel project (\`.vercel/\`); git integration deploys \`$FACT_BRANCH\`. No DigitalOcean spec."
+    if [ -n "$FACT_VOK" ]; then echo "- Vercel project: \`$FACT_VNAME\` · $FACT_VURL (linked in \`.vercel/project.json\`)"
+    else echo "- Vercel project: \`${FACT_VNAME:-?}\` (linked in \`.vercel/\`; live state not checked — no Vercel credentials)"; fi
+    echo "- Voice: \"roll back $FACT_NAME, confirm\" reverts production; Vercel then holds new pushes until \"roll forward $FACT_NAME, confirm\"."
   else
     echo "- No \`.do/app.yaml\` — shipmate's app verbs (status, rollback) are unavailable here; \`/deploy\` creates one."
   fi
@@ -100,6 +112,9 @@ card() {
 # ---- drift check ---------------------------------------------------------------------------
 check() { # prints reasons; returns 1 if any
   local bad=0
+  if [ -n "$FACT_VERCEL" ] && [ -n "$FACT_VOK" ]; then
+    local vout; vout="$(bash "$(dirname "${BASH_SOURCE[0]}")/vercel-app.sh" check "$DIR" 2>&1)" || { printf '%s\n' "$vout"; bad=1; }
+  fi
   if [ -n "$FACT_APP" ]; then
     case "$FACT_LIVE" in
       no)  echo "  ✗ .do/app.yaml names '$FACT_APP' but no DigitalOcean app has that name"; bad=1 ;;
@@ -140,13 +155,13 @@ write_card() { # <dir>
 # ---- main ----------------------------------------------------------------------------------
 if [ "${1:-}" = "--check-all" ]; then
   root="${2:-${SHIPMATE_SITES_ROOT:-$HOME/Sites}}"; fails=0; n=0
-  for d in "$root"/*/; do
-    [ -d "$d/.git" ] && [ -f "$d/.do/app.yaml" ] || continue
-    n=$((n+1)); gather "${d%/}"
-    if out="$(check)"; then printf '  \033[32m✓\033[0m %s → %s\n' "$(basename "$d")" "${FACT_APP:-?}"
+  for d in "$root"/*/ "$root"/*/*/; do   # one level, or two for grouped checkouts (~/Sites/client/app)
+    [ -d "$d/.git" ] && { [ -f "$d/.do/app.yaml" ] || [ -f "$d/.vercel/project.json" ]; } || continue
+    n=$((n+1)); gather "${d%/}"; DIR="${d%/}"
+    if out="$(check)"; then printf '  \033[32m✓\033[0m %s → %s\n' "$(basename "$d")" "${FACT_APP:-${FACT_VNAME:+vercel:$FACT_VNAME}}"
     else printf '  \033[31m✗\033[0m %s\n%s\n' "$(basename "$d")" "$out"; fails=$((fails+1)); fi
   done
-  echo "$n repo(s) with a DigitalOcean spec, $fails with drift"
+  echo "$n deployable repo(s), $fails with drift"
   [ "$fails" -eq 0 ]
   exit
 fi

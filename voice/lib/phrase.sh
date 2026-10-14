@@ -56,6 +56,8 @@ phrase_verb() {
       echo counsel; return ;;
     roll\ back*|rollback*|undo\ the\ deploy*|undo\ the\ last\ deploy*|revert\ the\ deploy*)
       echo rollback; return ;;
+    roll\ forward*|rollforward*|undo\ the\ rollback*|undo\ rollback*)
+      echo rollforward; return ;;
     doctor|health\ check|preflight|pre\ flight|are\ we\ healthy*|how\'s\ the\ system*)
       echo doctor; return ;;
     log\ *|captain\'s\ log\ *)
@@ -112,7 +114,8 @@ phrase_route() {
 
 # ---- project resolution --------------------------------------------------------------------
 # Dictation is the weakest link: "unakin" arrives as "anakin", "davidpuerto.com" can never match
-# a directory called davidpuerto.com-portfolio. So a phrase resolves to a project two ways:
+# a directory called davidpuerto.com-portfolio. So a phrase resolves to a project two ways,
+# alias first (explicit intent wins over a folder of the same name):
 #   1. a word (or two adjacent words joined — "shotgun detour" → shotgundetour) that names a
 #      directory under $SITES_ROOT, case-insensitive;
 #   2. an alias from $SHIPMATE_ALIASES (default ~/.shipmate/aliases): one "alias|target" per
@@ -138,6 +141,13 @@ resolve_alias() { # <key> — directory for an alias key, else empty
 resolve_project() { # <normalized phrase>
   local root="${SITES_ROOT:-$HOME/Sites}" w prev="" prev2="" d base hit
   for w in $1; do
+    # An alias is the owner's explicit intent, so it beats a folder of the same name
+    # ("rillet" → rillet/rillet-case-study, not the ~/Sites/rillet group folder). Aliases may
+    # span up to three adjacent dictated words ("you know kin").
+    hit="$(resolve_alias "$(phrase_alias_key "$w")")"
+    [ -n "$hit" ] || { [ -n "$prev" ] && hit="$(resolve_alias "$(phrase_alias_key "$prev$w")")"; }
+    [ -n "$hit" ] || { [ -n "$prev2" ] && hit="$(resolve_alias "$(phrase_alias_key "$prev2$prev$w")")"; }
+    if [ -n "$hit" ]; then printf '%s' "$hit"; return 0; fi
     for d in "$root"/*/; do
       [ -d "$d" ] || continue
       base="$(basename "$d" | tr '[:upper:]' '[:lower:]')"
@@ -145,11 +155,6 @@ resolve_project() { # <normalized phrase>
         printf '%s' "${d%/}"; return 0
       fi
     done
-    # aliases may span up to three adjacent dictated words ("you know kin")
-    hit="$(resolve_alias "$(phrase_alias_key "$w")")"
-    [ -n "$hit" ] || { [ -n "$prev" ] && hit="$(resolve_alias "$(phrase_alias_key "$prev$w")")"; }
-    [ -n "$hit" ] || { [ -n "$prev2" ] && hit="$(resolve_alias "$(phrase_alias_key "$prev2$prev$w")")"; }
-    if [ -n "$hit" ]; then printf '%s' "$hit"; return 0; fi
     prev2="$prev"; prev="$w"
   done
   printf ''

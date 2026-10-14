@@ -35,9 +35,9 @@ case "$1" in
   --check) installed "${2:?project dir}" && { echo "✓ guard installed"; exit 0; } || { echo "✗ no shipmate pre-push guard in ${2}"; exit 1; } ;;
   --all|--check-all)
     root="${2:-${SHIPMATE_SITES_ROOT:-$HOME/Sites}}"; n=0; bad=0
-    for d in "$root"/*/; do
+    for d in "$root"/*/ "$root"/*/*/; do   # one level, or two for grouped checkouts
       [ -d "$d/.git" ] || continue
-      [ -f "$d/.shipmate.yml" ] || [ -f "$d/.do/app.yaml" ] || continue
+      [ -f "$d/.shipmate.yml" ] || [ -f "$d/.do/app.yaml" ] || [ -f "$d/.vercel/project.json" ] || continue
       n=$((n+1))
       if [ "$1" = "--all" ]; then install_one "${d%/}"
       elif installed "${d%/}"; then printf '  \033[32m✓\033[0m %s — guard installed\n' "$(basename "$d")"

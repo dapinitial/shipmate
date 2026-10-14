@@ -47,3 +47,23 @@ DNS is the actual painpoint, and the fix is *where DNS lives*, not "automate the
 PaaS platforms own the host. Nobody owns the seam across host **and** DNS **and** registrar —
 especially registrars with no API. That gap, plus a safety model for letting an agent touch
 irreversible/billable infra, is the part worth building.
+
+## Behind the gate (provider-neutral verbs)
+
+Every provider answers the same verbs through `skills/deploy/bin/app.sh`, so the plan grant,
+preflight, the pre-push guard, the live check, rollback and the decision ledger work the same way
+whichever host a project uses.
+
+| Verb | DigitalOcean (`do-app.sh`) | Vercel (`vercel-app.sh`) |
+|---|---|---|
+| `status`, `url` | doctl | REST API (custom domain preferred) |
+| `phase <sha>` | deployment whose `source_commit_hash` matches | production deployment whose `githubCommitSha` matches |
+| `check` | spec names a live app that deploys from origin | project's git link is origin's repo |
+| `rollback [--yes]` | DO API rollback to the previous successful deployment | `vercel rollback` to the previous ready production deployment |
+| `roll-forward [--yes]` | not needed (pushes keep deploying) | `vercel promote` the newest ready deployment |
+
+Phases are normalized to `PENDING · BUILDING · LIVE · SUPERSEDED · FAILED · UNKNOWN`.
+
+**Vercel caveat, spoken every time:** after a production rollback Vercel stops promoting new pushes
+until you roll forward ("roll forward <project>, confirm"). Credentials: `VERCEL_TOKEN`, else the
+Vercel CLI's own login; never echoed, never in argv. Reads use the REST API, writes the CLI.

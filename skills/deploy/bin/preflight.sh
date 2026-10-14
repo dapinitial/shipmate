@@ -7,14 +7,14 @@
 # Checks:
 #   · a git repo, on the production branch (.shipmate.yml branch, default main)
 #   · not behind the deploy remote (a push would be rejected)
-#   · the deploy remote exists and, when a DigitalOcean spec names an app, that app is live
-#     and deploys from that remote (deploy-card.sh --check)
+#   · the deploy remote exists, and the provider's app deploys from it: a DigitalOcean spec names a
+#     live app (deploy-card.sh --check) or the Vercel project's git link is origin (vercel-app.sh check)
 #   · no protected path is modified or untracked in the working tree
 #   · the pre-push guard is installed
-#   · doctl is authenticated when the project has a DigitalOcean spec
+#   · the provider's credentials work (doctl auth, or VERCEL_TOKEN / vercel login)
 set -uo pipefail
 case "${1:-}" in -h|--help|"") sed -n '2,15p' "$0"; exit 0;; esac
-DIR="${1%/}"; BIN="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"; . "$BIN/../lib/project.sh"
+DIR="${1%/}"; BIN="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"; . "$BIN/../lib/project.sh"; . "$BIN/../lib/provider.sh"
 bad=0; say() { echo "$1"; bad=1; }
 
 [ -d "$DIR/.git" ] || { echo "$(basename "$DIR") is not a git repository."; exit 1; }
@@ -33,12 +33,15 @@ done <<EOF
 $(git -C "$DIR" status --porcelain 2>/dev/null | cut -c4- | sed 's/^.* -> //')
 EOF
 bash "$BIN/install-hooks.sh" --check "$DIR" >/dev/null 2>&1 || say "the pre-push guard is not installed in $(basename "$DIR") (install-hooks.sh)."
-if [ -f "$DIR/.do/app.yaml" ]; then
-  if command -v doctl >/dev/null 2>&1 && doctl account get >/dev/null 2>&1; then
-    out="$(bash "$BIN/deploy-card.sh" "$DIR" --check 2>&1)" || say "$(printf '%s' "$out" | sed -E 's/^ *✗ *//' | head -1)"
-  else
-    say "doctl is not authenticated, so the deploy can't be watched — run doctl auth init."
-  fi
-fi
+case "$(provider_of "$DIR")" in
+  do)
+    if command -v doctl >/dev/null 2>&1 && doctl account get >/dev/null 2>&1; then
+      out="$(bash "$BIN/deploy-card.sh" "$DIR" --check 2>&1)" || say "$(printf '%s' "$out" | sed -E 's/^ *✗ *//' | head -1)"
+    else
+      say "doctl is not authenticated, so the deploy can't be watched — run doctl auth init."
+    fi ;;
+  vercel)
+    out="$(bash "$BIN/vercel-app.sh" check "$DIR" 2>&1)" || say "$(printf '%s' "$out" | sed -E 's/^ *✗ *//' | head -1)" ;;
+esac
 [ "$bad" -eq 0 ] && echo "OK"
 exit $bad

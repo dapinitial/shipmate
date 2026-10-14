@@ -23,6 +23,7 @@ SELF="$VOICE_DIR/$(basename "${BASH_SOURCE[0]}")"
 . "$VOICE_DIR/lib/gate.sh"
 . "$VOICE_DIR/../skills/deploy/lib/project.sh"
 . "$VOICE_DIR/../skills/deploy/lib/ledger.sh"
+. "$VOICE_DIR/../skills/deploy/lib/provider.sh"
 . "$VOICE_DIR/../skills/deploy/lib/json.sh"
 
 # Optional config (non-secret): export SHIPMATE_NTFY_TOPIC etc. See README.md.
@@ -224,7 +225,7 @@ turn() { # <phrase> <mode:plan|execute> <project dir>
     else
       ledger_record ship executed "$pname" "$phrase" "no new commit" >/dev/null
     fi
-    if [ -n "$head_after" ] && [ "$head_after" != "$head_before" ] && [ -f "$project/.do/app.yaml" ] \
+    if [ -n "$head_after" ] && [ "$head_after" != "$head_before" ] && [ "$(provider_of "$project")" != none ] \
        && ! git status -sb 2>/dev/null | head -1 | grep -q 'ahead'; then
       nohup bash "$SELF" --verify-live "$project" "$head_after" >/dev/null 2>&1 &
     fi
@@ -236,43 +237,32 @@ turn() { # <phrase> <mode:plan|execute> <project dir>
 # verify_live <project dir> <sha> — wait for the deployment of <sha> to go ACTIVE (or fail), then
 # push one line: what's live, or what to say to roll back. Never speaks; always pushes.
 verify_live() {
-  local project="$1" sha="$2" short name id url phase waited=0 limit="${SHIPMATE_VERIFY_TIMEOUT:-900}" code expect
+  local project="$1" sha="$2" short name url phase waited=0 limit="${SHIPMATE_VERIFY_TIMEOUT:-900}" code expect appsh
   short="$(printf '%s' "$sha" | cut -c1-7)"; name="$(basename "$project")"
-  command -v doctl >/dev/null 2>&1 || return 0
-  id="$(doctl apps list --format ID,Spec.Name --no-header 2>/dev/null \
-        | awk -v n="$(sed -nE 's/^name:[[:space:]]*//p' "$project/.do/app.yaml" | head -1)" '$2==n{print $1}')"
-  [ -n "$id" ] || return 0
+  appsh="$VOICE_DIR/../skills/deploy/bin/app.sh"
+  [ "$(bash "$appsh" provider "$project")" != none ] || return 0
   while [ "$waited" -lt "$limit" ]; do
-    # Match the deployment by the commit it actually built (source_commit_hash), not by the
-    # "Cause" text — a manual or retried deployment of the same commit has a different cause.
-    phase="$(doctl apps list-deployments "$id" -o json 2>/dev/null | python3 -c '
-import sys, json
-sha = sys.argv[1]
-try: ds = json.load(sys.stdin)
-except Exception: ds = []
-for d in ds:
-    hashes = [svc.get("source_commit_hash", "") for svc in (d.get("services") or []) + (d.get("static_sites") or [])]
-    if any(h.startswith(sha) for h in hashes):
-        print(d.get("phase", "")); break
-' "$sha" 2>/dev/null)"
+    # Each provider reports the deployment built from this commit as one normalized phase.
+    phase="$(bash "$appsh" phase "$project" "$sha" 2>/dev/null | tail -1)"
     case "$phase" in
-      ACTIVE)
-        # The address people actually open: the PRIMARY domain from the spec, else the app's
-        # default ingress. doctl prints "<nil>" for an unset column — treat that as empty.
+      LIVE|SUPERSEDED)
+        # The address people open: health_url in .shipmate.yml, else the provider's production URL.
         url="$(project_health_url "$project")"
-        [ -n "$url" ] || { url="$(awk '/^ *- *domain:/{d=$3} /type: *PRIMARY/{print d; exit}' "$project/.do/app.yaml" 2>/dev/null)"; [ -n "$url" ] && url="https://$url"; }
-        [ -n "$url" ] || url="$(doctl apps get "$id" --format DefaultIngress --no-header 2>/dev/null | grep -v '<nil>')"
+        [ -n "$url" ] || url="$(bash "$appsh" url "$project" 2>/dev/null | grep -v '<nil>' | tail -1)"
         code="$(curl -s -m 15 -o /dev/null -w '%{http_code}' "$url" 2>/dev/null)"; [ -n "$code" ] || code=000
         expect="$(project_expect_text "$project")"
-        if [ "$code" = 200 ] && [ -n "$expect" ] && ! curl -s -m 15 "$url" 2>/dev/null | grep -q -F -- "$expect"; then
-          ledger_record verify-live warned "$name" "deploy $short" "ACTIVE, $url 200 but missing expected text" >/dev/null
-          notify "⚠️ $name: deploy $short is ACTIVE and $url answers 200, but the page doesn't contain \"$expect\" — say 'roll back $name, confirm' if that's wrong."
+        if [ "$phase" = SUPERSEDED ]; then
+          ledger_record verify-live live "$name" "deploy $short" "went live, already superseded by a newer deploy; $url $code" >/dev/null
+          notify "✅ $name: $short went live and has already been replaced by a newer deploy — $url"
+        elif [ "$code" = 200 ] && [ -n "$expect" ] && ! curl -s -m 15 "$url" 2>/dev/null | grep -q -F -- "$expect"; then
+          ledger_record verify-live warned "$name" "deploy $short" "live, $url 200 but missing expected text" >/dev/null
+          notify "⚠️ $name: deploy $short is live and $url answers 200, but the page doesn't contain \"$expect\" — say 'roll back $name, confirm' if that's wrong."
         elif [ "$code" = 200 ]; then ledger_record verify-live live "$name" "deploy $short" "$url 200" >/dev/null; notify "✅ $name is live: $short — $url"
-        else ledger_record verify-live warned "$name" "deploy $short" "ACTIVE but $url answered HTTP $code" >/dev/null; notify "⚠️ $name: deploy $short is ACTIVE but $url answered HTTP $code — say 'roll back $name, confirm' if it looks wrong."; fi
+        else ledger_record verify-live warned "$name" "deploy $short" "live but $url answered HTTP $code" >/dev/null; notify "⚠️ $name: deploy $short is live but $url answered HTTP $code — say 'roll back $name, confirm' if it looks wrong."; fi
         return 0 ;;
-      ERROR|CANCELED)
-        ledger_record verify-live failed "$name" "deploy $short" "deployment $phase" >/dev/null
-        notify "❌ $name: deploy of $short $phase — the previous version is still live. Say 'roll back $name, confirm' to be sure, or fix and ship again."
+      FAILED)
+        ledger_record verify-live failed "$name" "deploy $short" "deployment failed" >/dev/null
+        notify "❌ $name: deploy of $short failed — the previous version is still live. Fix and ship again."
         return 0 ;;
     esac
     sleep 20; waited=$((waited + 20))
@@ -626,13 +616,13 @@ verb_status() {
   done
   # Live deploy state for every project in play (session + jobs) — "job done" is not
   # "deployed", and a driver shouldn't have to hold that distinction.
-  appsh="$VOICE_DIR/../skills/deploy/bin/do-app.sh"
+  appsh="$VOICE_DIR/../skills/deploy/bin/app.sh"
   plist="$( { if [ -f "$STATE_DIR/session.project" ]; then cat "$STATE_DIR/session.project"; echo; fi
               for d in "$JOBS_DIR"/*/; do
                 if [ -d "$d" ]; then cat "$d/project" 2>/dev/null; echo; fi
               done; } | awk 'NF' | sort -u )"
   while IFS= read -r p; do
-    [ -n "$p" ] && [ -f "$p/.do/app.yaml" ] || continue
+    [ -n "$p" ] && [ "$(provider_of "$p")" != none ] || continue
     phase="$(bash "$appsh" status "$p" 2>/dev/null | awk -F': *' '/^deploy:/{print $2}' | awk '{print $1}')"
     [ -n "$phase" ] && line="$line $(basename "$p") production deploy: $phase."
   done <<EOF
@@ -651,24 +641,30 @@ EOF
 
 # verb_rollback <project dir> <mode> — deterministic (no model in the loop): a panicked
 # "roll back, confirm" is a code path. Plan mode describes; execute reverts via the DO API.
-verb_rollback() {
-  local project="$1" mode="$2" appsh out pname
-  appsh="$VOICE_DIR/../skills/deploy/bin/do-app.sh"
-  pname="$(basename "$project")"
-  if [ ! -f "$project/.do/app.yaml" ]; then
-    speak "Rollback is wired for DigitalOcean apps so far, and $pname doesn't have one. Tell me which project to roll back."
+verb_rollback() { # <project> <plan|execute> [forward] — deterministic, no model in the loop
+  local project="$1" mode="$2" dir="${3:-back}" appsh out pname verb prov
+  appsh="$VOICE_DIR/../skills/deploy/bin/app.sh"
+  pname="$(basename "$project")"; prov="$(bash "$appsh" provider "$project")"
+  verb=rollback; [ "$dir" = forward ] && verb=roll-forward
+  if [ "$prov" = none ]; then
+    speak "I don't know where $pname is deployed — it has no DigitalOcean or Vercel link. Tell me which project you mean."
     return 1
   fi
   if [ "$mode" = "execute" ]; then
-    if out="$(bash "$appsh" rollback "$project" --yes 2>&1)"; then
-      speak "Rolling back $pname to the previous successful deployment now — cost neutral. Ask me for status in a minute to confirm it's active."
+    if out="$(bash "$appsh" "$verb" "$project" --yes 2>&1)"; then
+      ledger_record "$verb" executed "$pname" "roll $dir $pname" "$prov: $(printf '%s' "$out" | tail -n1)" >/dev/null
+      speak "$(printf '%s' "$out" | tail -n1 | sed 's/^✓ *//') Cost neutral. Ask me for status in a minute to confirm."
     else
-      speak "Rollback failed: $(printf '%s' "$out" | tail -n1 | clip 200)"
+      ledger_record "$verb" failed "$pname" "roll $dir $pname" "$prov: $(printf '%s' "$out" | tail -n1)" >/dev/null
+      speak "Roll $dir failed: $(printf '%s' "$out" | tail -n1 | clip 200)"
       return 1
     fi
   else
-    out="$(bash "$appsh" status "$project" 2>&1 || true)"
-    speak "This would revert $pname to its previous successful deployment — cost neutral, and you can roll forward again by redeploying. Current state: $(printf '%s' "$out" | awk -F': *' '/^deploy:/{print $2}' | clip 120). To do it, say: roll back $pname, confirm."
+    out="$(bash "$appsh" "$verb" "$project" 2>&1 || true)"
+    case "$(printf '%s' "$out" | tail -n1)" in
+      Would*) speak "$(printf '%s' "$out" | tail -n1 | sed -E 's/^Would /This would /') To do it, say: roll $dir $pname, confirm." ;;
+      *)      speak "$(printf '%s' "$out" | tail -n1 | sed -E 's/^[✓✗] *//')" ;;
+    esac
   fi
 }
 
@@ -734,8 +730,9 @@ case "${1:-}" in
     speak "usage: --counsel-set <on|off>"; exit 1 ;;
   --rollback)
     PROJ="$(project_or_default "$(resolve_project "$(phrase_normalize "${2:-}")")")"
-    MODE="plan"; [ "${3:-}" = "--yes" ] && MODE="execute"
-    verb_rollback "$PROJ" "$MODE"; exit $? ;;
+    MODE="plan"; DIRN="back"
+    for a in "${@:3}"; do case "$a" in --yes) MODE="execute" ;; --forward) DIRN="forward" ;; esac; done
+    verb_rollback "$PROJ" "$MODE" "$DIRN"; exit $? ;;
   --doctor)   verb_doctor; exit 0 ;;
   --watchdog) verb_watchdog; exit 0 ;;
   --verify-live) verify_live "$2" "$3"; exit 0 ;;
@@ -789,6 +786,7 @@ case "$VERB" in
   doctor)   verb_doctor ;;
   log)      verb_log "$(phrase_log_body "$CLEAN")" "$MODE" ;;
   rollback) verb_rollback "$(project_or_default "$(resolve_project "$CLEAN")")" "$MODE" ;;
+  rollforward) verb_rollback "$(project_or_default "$(resolve_project "$CLEAN")")" "$MODE" forward ;;
   counsel) run_or_queue counsel "$MODE" "$(project_or_default "$(resolve_project "$CLEAN")")" "$(phrase_counsel_question "$CLEAN")" ;;
   job)    run_or_queue job "$MODE" "$(project_or_default "$(resolve_project "$CLEAN")")" "$(phrase_task "$CLEAN")" ;;
   say)    run_or_queue say "$MODE" "$(project_or_default "$(resolve_project "$CLEAN")")" "$CLEAN" ;;

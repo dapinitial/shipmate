@@ -58,6 +58,9 @@ ok "health check"        "$(phrase_verb 'health check')"                        
 ok "roll back"           "$(phrase_verb 'roll back panogram')"                        rollback
 ok "rollback one word"   "$(phrase_verb 'rollback panogram')"                         rollback
 ok "undo the deploy"     "$(phrase_verb 'undo the deploy on panogram')"               rollback
+ok "roll forward"        "$(phrase_verb 'roll forward rillet')"                       rollforward
+ok "undo the rollback"   "$(phrase_verb 'undo the rollback on rillet')"               rollforward
+ok "roll forward confirm executes" "$(phrase_mode 'roll forward rillet confirm')"     execute
 ok "counsel on (exact)"  "$(phrase_verb 'counsel on')"                                counsel_on
 ok "counsel off (exact)" "$(phrase_verb 'counsel off')"                               counsel_off
 ok "counsel question"    "$(phrase_verb 'counsel on whether to move to vercel')"      counsel
@@ -97,8 +100,8 @@ ok "plain passthrough"  "$(phrase_task 'upgrade astro')"                        
 
 echo "project resolution (directories + dictation aliases):"
 TMP="$(mktemp -d 2>/dev/null || mktemp -d -t shipmate)"
-mkdir -p "$TMP/sites/unakin" "$TMP/sites/shotgundetour" "$TMP/sites/davidpuerto.com-portfolio" "$TMP/sites/portfolio-lab"
-printf '%s\n' "# dictation aliases" "anakin|unakin" "portfolio|davidpuerto.com-portfolio" "You know kin | unakin" "ghost|does-not-exist" "abs|$TMP/sites/unakin" > "$TMP/aliases"
+mkdir -p "$TMP/sites/unakin" "$TMP/sites/shotgundetour" "$TMP/sites/davidpuerto.com-portfolio" "$TMP/sites/portfolio-lab" "$TMP/sites/client/client-app"
+printf '%s\n' "# dictation aliases" "anakin|unakin" "portfolio|davidpuerto.com-portfolio" "You know kin | unakin" "ghost|does-not-exist" "abs|$TMP/sites/unakin" "client|client/client-app" > "$TMP/aliases"
 SITES_ROOT="$TMP/sites"; SHIPMATE_ALIASES="$TMP/aliases"
 ok "exact dir"              "$(resolve_project 'deploy unakin')"                 "$TMP/sites/unakin"
 ok "normalized dictation"   "$(resolve_project "$(phrase_normalize 'Deploy Unakin, confirm.')")" "$TMP/sites/unakin"
@@ -109,6 +112,7 @@ ok "alias two words"        "$(resolve_project 'status of you know kin')"       
 ok "alias absolute target"  "$(resolve_project 'abs status')"                    "$TMP/sites/unakin"
 ok "alias to missing dir"   "$(resolve_project 'deploy ghost')"                  ""
 ok "no project named"       "$(resolve_project 'on the whole deploy it')"        ""
+ok "alias beats same-name folder" "$(resolve_project 'in client change the button')" "$TMP/sites/client/client-app"
 ok "no aliases file"        "$(SHIPMATE_ALIASES=/nonexistent resolve_project 'in anakin')" ""
 rm -rf "$TMP"; unset SITES_ROOT SHIPMATE_ALIASES
 

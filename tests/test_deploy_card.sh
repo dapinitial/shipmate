@@ -98,7 +98,7 @@ ok "text after card survives refresh" "$(tail -1 "$G/CLAUDE.md")" "# after"
 echo "--check-all:"
 out="$(bash "$CARD" --check-all "$TMP/sites" 2>&1)"; rc=$?
 ok  "fleet check fails when any drift" "$rc" 1
-has "fleet summary line" "$out" "with a DigitalOcean spec"
+has "fleet summary line" "$out" "deployable repo(s)"
 has "good repo listed ok" "$out" "good → good-app"
 
 echo "degrades without doctl:"

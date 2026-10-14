@@ -157,14 +157,16 @@ const TOOLS = [
   },
   {
     name: 'shipmate_rollback',
-    description: 'Roll a project back to its previous successful deployment (DigitalOcean; ' +
-      'cost-neutral, reversible by redeploying). Without confirm:true it only DESCRIBES what ' +
-      'would happen; with confirm:true it acts, deterministically — no model in the loop.',
+    description: 'Roll a project back to its previous successful production deployment, or with ' +
+      'forward:true roll it forward to the newest one (DigitalOcean or Vercel; cost-neutral). After a ' +
+      'Vercel rollback, new pushes are held until you roll forward. Without confirm:true it only ' +
+      'DESCRIBES what would happen; with confirm:true it acts, deterministically — no model in the loop.',
     inputSchema: {
       type: 'object',
       properties: {
         project: { type: 'string', description: 'Project name under the sites root' },
-        confirm: { type: 'boolean', description: 'true = actually roll back; false/omitted = describe only' },
+        confirm: { type: 'boolean', description: 'true = actually do it; false/omitted = describe only' },
+        forward: { type: 'boolean', description: 'true = roll forward to the newest deployment (undo a rollback)' },
       },
       required: ['project'],
     },
@@ -219,7 +221,7 @@ async function callTool(name, args) {
     case 'shipmate_doctor':
       return wrap(await bridge(['--doctor']));
     case 'shipmate_rollback':
-      return wrap(await bridge(['--rollback', proj, ...(a.confirm === true ? ['--yes'] : [])]));
+      return wrap(await bridge(['--rollback', proj, ...(a.confirm === true ? ['--yes'] : []), ...(a.forward === true ? ['--forward'] : [])]));
     case 'shipmate_log':
       return wrap(await bridge(['--log', proj, ...(a.publish === true ? ['--publish'] : []), a.text]));
     case 'shipmate_counsel':
