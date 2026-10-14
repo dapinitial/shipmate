@@ -26,14 +26,23 @@ The endpoint is `https://<your-mac>.<tailnet>.ts.net/mcp`. Add it at claude.ai â
 Connectors â†’ **Add custom connector**, and leave the sign-in option on **OAuth** (the default
 it detects). Claude registers itself, then sends you to shipmate's sign-in page.
 
-**Signing in needs you, on your own devices.** The page shows a six-character code and pushes
-an **Approve / Deny** notification to your phone. The buttons call the onboarding server,
-which listens only on your tailnet, so reading the notification is not enough to approve. No
-phone handy? On the Mac:
+**Signing in needs you, on your own devices.** Enroll a passkey once: on your iPhone (Tailscale
+on) open the onboarding page and tap **Add a passkey on this device**, or on the Mac run
+`node mcp/shipmate-mcp.js --enroll-passkey` and open the copied link. Face ID or Touch ID creates it.
+From then on the sign-in page has one button, **Sign in with passkey**. The browser signs a
+one-time challenge with a key bound to this server's address, so a lookalike site can't use it,
+and biometrics (or the device passcode) are required, not just a tap.
+
+Until a passkey exists, sign-in falls back to an **Approve / Deny** push whose buttons only work
+from your tailnet. Once one exists, that push is off. On the Mac, this always works:
 
 ```bash
 node mcp/shipmate-mcp.js --approve-login ABC-123
 ```
+
+Passkeys: `--passkeys` lists them, `--remove-passkey <id>` deletes one. Attestation is "none":
+the one-time enrollment link (tailnet page or Mac shell, 10 minutes, single use) is the root of
+trust. A sign count that goes backwards (a cloned authenticator) is refused.
 
 What the server enforces (OAuth 2.1, per the MCP authorization spec):
 
@@ -51,7 +60,8 @@ What the server enforces (OAuth 2.1, per the MCP authorization spec):
 Admin on the host: `--grants` lists sign-ins, `--revoke-all` signs every client out.
 `tailscale funnel --https=443 off` removes public access entirely. The pre-OAuth URL token
 (`/mcp/<token>`) is revoked: the server deletes it on start and that path is a 404.
-`tests/test_mcp_auth.sh` runs a real server and attacks the boundary (53 assertions).
+`tests/test_mcp_auth.sh` runs a real server and attacks the boundary, including a simulated
+authenticator for passkeys (92 assertions).
 
 ## Tools
 

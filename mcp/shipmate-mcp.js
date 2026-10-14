@@ -10,6 +10,7 @@
  *     limited to Claude callbacks + loopback, scopes shipmate:read / shipmate:execute, owner
  *     approval by a tailnet-only tap). See mcp/README.md.
  *   Admin (on the host):    --approve-login <CODE> · --deny-login <CODE> · --grants · --revoke-all
+ *                           --enroll-passkey · --passkeys · --remove-passkey <id>
  *
  * Tools (both transports):
  *   shipmate_plan      — describe what a request would do + cost. Read-only, always safe.
@@ -392,9 +393,117 @@ function audit(event, detail) {
   } catch {}
 }
 
+// ---- passkeys (WebAuthn) -------------------------------------------------------------------
+//
+// Once the owner enrolls a passkey, signing in to shipmate means Face ID / Touch ID on their own
+// device: the browser signs a one-time challenge with a key bound to this server's origin, so it
+// can't be phished or replayed, and nothing has to be delivered to a phone. The phone-push
+// approval is then off for sign-in; `--approve-login` on the host stays as recovery.
+//
+// Enrolling needs a one-time link (10 minutes, single use) that only the owner can mint: from the
+// tailnet-only onboarding page (/passkey) or on the host (--enroll-passkey). Attestation is
+// "none": the enrollment link is the root of trust, not the authenticator's maker.
+// Verification is zero-dependency: clientDataJSON (type, challenge, origin), authenticatorData
+// (RP ID hash, user-present + user-verified flags, sign count) and an ES256 or RS256 signature.
+
+const PASSKEYS_FILE = path.join(STATE_DIR, 'passkeys.json');
+const ENROLL_FILE = path.join(STATE_DIR, 'passkey-enroll.json');
+const PUBLIC_URL_FILE = path.join(STATE_DIR, 'public-url');
+const ENROLL_TTL_S = 600;
+
+const b64urlDecode = (t) => Buffer.from(String(t || '').replace(/-/g, '+').replace(/_/g, '/'), 'base64');
+const readJson = (f, d) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return d; } };
+const writeJson = (f, v) => {
+  fs.mkdirSync(path.dirname(f), { recursive: true });
+  fs.writeFileSync(f + '.tmp', JSON.stringify(v, null, 1), { mode: 0o600 }); fs.renameSync(f + '.tmp', f);
+};
+const loadPasskeys = () => readJson(PASSKEYS_FILE, []);
+const savePasskeys = (list) => writeJson(PASSKEYS_FILE, list);
+
+// The public origin, as the HTTP server last saw it (the onboarding process can't ask Tailscale
+// under launchd, so the HTTP server records it whenever it serves a tailnet request).
+function publicUrl() {
+  if (process.env.SHIPMATE_PUBLIC_URL) return process.env.SHIPMATE_PUBLIC_URL.replace(/\/+$/, '');
+  try { return fs.readFileSync(PUBLIC_URL_FILE, 'utf8').trim(); } catch { return ''; }
+}
+
+function mintEnrollToken() {
+  const t = rand(24), db = readJson(ENROLL_FILE, {}), n = now();
+  for (const k of Object.keys(db)) if (db[k] < n) delete db[k];
+  db[sha(t)] = n + ENROLL_TTL_S; writeJson(ENROLL_FILE, db);
+  return t;
+}
+function enrollTokenValid(t, consume) {
+  const db = readJson(ENROLL_FILE, {}), h = sha(t || ''), ok = !!db[h] && db[h] >= now();
+  if (consume && db[h]) { delete db[h]; writeJson(ENROLL_FILE, db); }
+  return ok;
+}
+
+// authenticatorData: rpIdHash(32) flags(1) signCount(4) [aaguid(16) credIdLen(2) credId …]
+function parseAuthData(buf) {
+  if (buf.length < 37) throw new Error('authenticator data too short');
+  const flags = buf[32], out = { rpIdHash: buf.subarray(0, 32), up: !!(flags & 1), uv: !!(flags & 4),
+    signCount: buf.readUInt32BE(33) };
+  if (flags & 0x40 && buf.length >= 55) {
+    const len = buf.readUInt16BE(53);
+    out.credId = buf.subarray(55, 55 + len);
+  }
+  return out;
+}
+
+// Common checks for both ceremonies; returns the parsed authenticator data or throws.
+function checkCeremony(kind, clientDataJSON, authData, challenge, origin) {
+  let cd;
+  try { cd = JSON.parse(clientDataJSON.toString('utf8')); } catch { throw new Error('bad clientDataJSON'); }
+  if (cd.type !== kind) throw new Error(`wrong ceremony type ${cd.type}`);
+  if (!challenge || cd.challenge !== challenge) throw new Error('challenge mismatch');
+  if (cd.origin !== origin) throw new Error(`origin mismatch (${String(cd.origin).slice(0, 60)})`);
+  const ad = parseAuthData(authData);
+  const rpId = new URL(origin).hostname;
+  if (!crypto.timingSafeEqual(ad.rpIdHash, crypto.createHash('sha256').update(rpId).digest())) throw new Error('RP ID mismatch');
+  if (!ad.up) throw new Error('user not present');
+  if (!ad.uv) throw new Error('user not verified (Face ID / Touch ID / device PIN required)');
+  return ad;
+}
+
+function passkeyRegister(body, challenge, origin) {
+  const clientData = b64urlDecode(body.clientDataJSON), authData = b64urlDecode(body.authenticatorData);
+  const ad = checkCeremony('webauthn.create', clientData, authData, challenge, origin);
+  const rawId = b64urlDecode(body.id);
+  if (!ad.credId || !rawId.length || !ad.credId.equals(rawId)) throw new Error('credential id mismatch');
+  const alg = Number(body.alg);
+  if (alg !== -7 && alg !== -257) throw new Error(`unsupported algorithm ${alg}`);
+  const key = crypto.createPublicKey({ key: b64urlDecode(body.publicKey), format: 'der', type: 'spki' });
+  if (alg === -7 && key.asymmetricKeyDetails && key.asymmetricKeyDetails.namedCurve !== 'prime256v1') throw new Error('ES256 needs P-256');
+  const list = loadPasskeys();
+  if (list.some((k) => k.id === body.id)) throw new Error('passkey already enrolled');
+  const entry = { id: b64url(rawId), alg, spki: b64url(key.export({ format: 'der', type: 'spki' })),
+    name: String(body.name || 'passkey').slice(0, 60), created: now(), signCount: ad.signCount, lastUsed: 0 };
+  list.push(entry); savePasskeys(list);
+  return entry;
+}
+
+function passkeyAssert(body, challenge, origin) {
+  const list = loadPasskeys(), k = list.find((x) => x.id === body.id);
+  if (!k) throw new Error('unknown passkey');
+  const clientData = b64urlDecode(body.clientDataJSON), authData = b64urlDecode(body.authenticatorData);
+  const ad = checkCeremony('webauthn.get', clientData, authData, challenge, origin);
+  const signed = Buffer.concat([authData, crypto.createHash('sha256').update(clientData).digest()]);
+  const pub = crypto.createPublicKey({ key: b64urlDecode(k.spki), format: 'der', type: 'spki' });
+  const good = k.alg === -7
+    ? crypto.verify('sha256', signed, { key: pub, dsaEncoding: 'der' }, b64urlDecode(body.signature))
+    : crypto.verify('sha256', signed, pub, b64urlDecode(body.signature));
+  if (!good) throw new Error('bad signature');
+  // A counter that goes backwards means a cloned authenticator. Synced passkeys report 0: allowed.
+  if (ad.signCount !== 0 && ad.signCount <= k.signCount) throw new Error('sign count did not increase (possible clone)');
+  k.signCount = ad.signCount; k.lastUsed = now(); savePasskeys(list);
+  return k;
+}
+
 // ---- sign-in approval (reuses the tap-to-confirm channel) ----------------------------------
 
-const logins = new Map(); // pollId → { nonce, userCode, params, exp, attempts }
+const logins = new Map(); // pollId → { nonce, userCode, q, exp, passkey, challenge, access }
+const enrollChallenges = new Map(); // sha(enroll token) → { challenge, exp }
 const loginRate = [];      // timestamps of recent /authorize requests
 
 function tailnetIp() {
@@ -406,7 +515,7 @@ function tailnetIp() {
   return '';
 }
 
-function requestLoginApproval(desc) {
+function requestLoginApproval(desc, push = true) {
   const nonce = crypto.randomBytes(12).toString('hex');
   const alphabet = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
   let userCode = '';
@@ -416,7 +525,7 @@ function requestLoginApproval(desc) {
   fs.writeFileSync(path.join(APPROVALS, nonce), `pending ${now()}\n${desc} — code ${userCode}\nlogin ${userCode}\n`, { mode: 0o600 });
   const topic = readNtfyTopic(), ip = tailnetIp();
   let pushed = false;
-  if (topic && ip) {
+  if (push && topic && ip) {
     // A failed push must never take the server down: the page also offers --approve-login.
     // Header values must be Latin-1 for node's http client, so the button labels are plain text.
     try {
@@ -466,15 +575,24 @@ function cliLoginDecision(code, verdict) {
 }
 
 const esc = (t) => String(t).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-function loginPage(res, title, body, refresh) {
+function loginPage(res, title, body, refresh, script) {
+  const nonce = rand(12);
   res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store',
-    'X-Frame-Options': 'DENY', 'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'" });
+    'X-Frame-Options': 'DENY', 'Referrer-Policy': 'no-referrer',
+    'Content-Security-Policy': `default-src 'none'; style-src 'unsafe-inline'; connect-src 'self'; script-src 'nonce-${nonce}'` });
   res.end(`<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">` +
     (refresh ? `<meta http-equiv="refresh" content="2">` : '') +
     `<title>${esc(title)}</title><style>body{font:16px/1.5 -apple-system,system-ui,sans-serif;max-width:32rem;margin:12vh auto;padding:0 1.25rem;color:#1b1f2a;background:#f5f6f8}` +
     `h1{font-size:1.3rem}code,.code{font:600 1.6rem ui-monospace,Menlo,monospace;letter-spacing:.08em}.muted{color:#5a6070;font-size:.9rem}</style>` +
-    `<h1>${esc(title)}</h1>${body}`);
+    `<h1>${esc(title)}</h1>${body}` + (script ? `<script nonce="${nonce}">${script}</script>` : ''));
 }
+
+// Browser side of both ceremonies: tiny, no libraries, sends only what the server verifies.
+const WEBAUTHN_JS = `
+const d=(s)=>Uint8Array.from(atob(s.replace(/-/g,'+').replace(/_/g,'/')),c=>c.charCodeAt(0));
+const e=(b)=>btoa(String.fromCharCode(...new Uint8Array(b))).replace(/\\+/g,'-').replace(/\\//g,'_').replace(/=+$/,'');
+const say=(t)=>{document.getElementById('msg').textContent=t};
+async function post(u,b){const r=await fetch(u,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)});return [r.ok,await r.text()];}`;
 
 // ---- HTTP server ----------------------------------------------------------------------------
 
@@ -514,6 +632,51 @@ function serveHttp(port) {
     const base = baseUrl(req);
     if (!base) { res.writeHead(421); return res.end('misdirected request'); }
     const resource = `${base}/mcp`;
+    if (base.startsWith('https://') && publicUrl() !== base) { try { fs.writeFileSync(PUBLIC_URL_FILE, base + '\n', { mode: 0o600 }); } catch {} }
+
+    // -- passkey enrollment: one-time link from the tailnet page or the host -------------------
+    const en = p.match(/^\/passkey\/enroll\/([A-Za-z0-9_-]{20,40})$/);
+    if (en) {
+      if (!enrollTokenValid(en[1], false)) return loginPage(res, 'Link expired', '<p>Enrollment links work once, for 10 minutes. Make a new one from the onboarding page or with <code>--enroll-passkey</code>.</p>');
+      if (req.method === 'GET') {
+        const challenge = rand(32);
+        enrollChallenges.set(sha(en[1]), { challenge, exp: now() + ENROLL_TTL_S });
+        const exclude = loadPasskeys().map((k) => ({ type: 'public-key', id: k.id }));
+        const opts = { challenge, rp: { id: new URL(base).hostname, name: 'shipmate' },
+          user: { id: rand(16), name: 'owner', displayName: 'shipmate owner' },
+          pubKeyCredParams: [{ type: 'public-key', alg: -7 }, { type: 'public-key', alg: -257 }],
+          authenticatorSelection: { residentKey: 'preferred', userVerification: 'required' },
+          attestation: 'none', timeout: 120000, excludeCredentials: exclude };
+        return loginPage(res, 'Add a passkey to shipmate',
+          `<p>This makes a passkey for signing in to shipmate. Your device will ask for Face ID, Touch ID or its passcode.</p>` +
+          `<p><label>Name it <input id="nm" value="iPhone" maxlength="60"></label></p>` +
+          `<p><button id="go" style="font-size:1.05rem;padding:.6rem 1.1rem">Create passkey</button></p><p id="msg" class="muted"></p>`,
+          false, `${WEBAUTHN_JS}
+const o=${JSON.stringify(opts)};
+document.getElementById('go').onclick=async()=>{try{
+  const pk={...o,challenge:d(o.challenge),user:{...o.user,id:d(o.user.id)},excludeCredentials:o.excludeCredentials.map(x=>({...x,id:d(x.id)}))};
+  const c=await navigator.credentials.create({publicKey:pk});const r=c.response;
+  if(!r.getPublicKey){say('This browser is too old for passkeys here — update it and try again.');return;}
+  const [ok,t]=await post(location.pathname,{id:e(c.rawId),clientDataJSON:e(r.clientDataJSON),authenticatorData:e(r.getAuthenticatorData()),publicKey:e(r.getPublicKey()),alg:r.getPublicKeyAlgorithm(),name:document.getElementById('nm').value});
+  say(ok?'Done. Sign-ins to shipmate now use this passkey.':'Refused: '+t);if(ok)document.getElementById('go').disabled=true;
+}catch(x){say('Cancelled or failed: '+x.message)}};`);
+      }
+      if (req.method === 'POST') {
+        const ch = enrollChallenges.get(sha(en[1]));
+        const body = parseForm(await readBody(req, 65536), 'json');
+        try {
+          if (!ch || ch.exp < now()) throw new Error('no enrollment in progress — reload the page');
+          const k = passkeyRegister(body, ch.challenge, base);
+          enrollTokenValid(en[1], true); enrollChallenges.delete(sha(en[1]));
+          audit('passkey_enrolled', { passkey: k.id.slice(0, 8), name: k.name, alg: k.alg });
+          res.writeHead(200, { 'Content-Type': 'text/plain' }); return res.end('ok');
+        } catch (err) {
+          audit('passkey_enroll_refused', { why: err.message });
+          res.writeHead(400, { 'Content-Type': 'text/plain' }); return res.end(err.message);
+        }
+      }
+      res.writeHead(405); return res.end();
+    }
 
     // -- discovery ---------------------------------------------------------------------
     if (req.method === 'GET' && (p === '/.well-known/oauth-protected-resource' || p === '/.well-known/oauth-protected-resource/mcp')) {
@@ -577,17 +740,54 @@ function serveHttp(port) {
       if (pending >= 3 || loginRate.length >= 10) return back('temporarily_unavailable');
       loginRate.push(t);
       const access = scope.includes('shipmate:execute') ? 'full access (can ship)' : 'read-only';
-      const { nonce, userCode, pushed } = requestLoginApproval(`Sign in "${client.name}" to shipmate — ${access}`);
+      const usePasskey = loadPasskeys().length > 0;
+      const { nonce, userCode, pushed } = requestLoginApproval(`Sign in "${client.name}" to shipmate — ${access}`, !usePasskey);
       const pollId = rand(18);
-      logins.set(pollId, { nonce, userCode, exp: t + LOGIN_TTL_S, q: { ...q, scope: scope.join(' ') } });
-      audit('authorize_requested', { client: q.client_id.slice(0, 8), name: client.name, scope: scope.join(' '), pushed });
+      logins.set(pollId, { nonce, userCode, exp: t + LOGIN_TTL_S, q: { ...q, scope: scope.join(' ') },
+        passkey: usePasskey, challenge: rand(32), access });
+      audit('authorize_requested', { client: q.client_id.slice(0, 8), name: client.name, scope: scope.join(' '), pushed, passkey: usePasskey });
       res.writeHead(302, { Location: `/authorize/wait/${pollId}` }); return res.end();
+    }
+    const pk = p.match(/^\/authorize\/passkey\/([A-Za-z0-9_-]{16,40})$/);
+    if (pk && req.method === 'POST') {
+      const l = logins.get(pk[1]);
+      const body = parseForm(await readBody(req, 65536), 'json');
+      try {
+        if (!l || l.exp < now() || !l.passkey) throw new Error('no sign-in waiting — start again from Claude');
+        if (!l.challenge) throw new Error('challenge already used');
+        const challenge = l.challenge; l.challenge = null; // one assertion per challenge, pass or fail
+        const k = passkeyAssert(body, challenge, base);
+        const file = path.join(APPROVALS, l.nonce);
+        const lines = fs.readFileSync(file, 'utf8').split('\n');
+        fs.writeFileSync(file, [`approved ${now()}`, ...lines.slice(1)].join('\n'), { mode: 0o600 });
+        audit('passkey_signin', { passkey: k.id.slice(0, 8), name: k.name, client: l.q.client_id.slice(0, 8) });
+        res.writeHead(200, { 'Content-Type': 'text/plain' }); return res.end('ok');
+      } catch (err) {
+        if (l && l.passkey) l.challenge = rand(32); // a fresh one for the next try (page reload fetches it)
+        audit('passkey_signin_refused', { why: err.message });
+        res.writeHead(400, { 'Content-Type': 'text/plain' }); return res.end(err.message);
+      }
     }
     const wait = p.match(/^\/authorize\/wait\/([A-Za-z0-9_-]{16,40})$/);
     if (wait && req.method === 'GET') {
       const l = logins.get(wait[1]);
       if (!l || l.exp < now()) { logins.delete(wait[1]); return loginPage(res, 'Sign-in expired', '<p>Start again from Claude.</p>'); }
       const v = loginVerdict(l.nonce);
+      if (v === 'pending' && l.passkey) {
+        return loginPage(res, 'Sign in to shipmate',
+          `<p><b>${esc(l.q.client_id && (oauthLoad().clients[l.q.client_id] || {}).name || 'An app')}</b> is asking for ${esc(l.access)}.</p>` +
+          `<p><button id="go" style="font-size:1.05rem;padding:.6rem 1.1rem">Sign in with passkey</button></p><p id="msg" class="muted"></p>` +
+          `<p class="muted">Lost your passkey? On the Mac that runs shipmate: <code style="font-size:.85rem">node mcp/shipmate-mcp.js --approve-login ${esc(l.userCode)}</code></p>`,
+          false, `${WEBAUTHN_JS}
+const o=${JSON.stringify({ challenge: l.challenge, rpId: new URL(base).hostname, allow: loadPasskeys().map((k) => k.id) })};
+async function go(){try{
+  const c=await navigator.credentials.get({publicKey:{challenge:d(o.challenge),rpId:o.rpId,userVerification:'required',timeout:120000,
+    allowCredentials:o.allow.map(id=>({type:'public-key',id:d(id)}))}});const r=c.response;
+  const [ok,t]=await post(location.pathname.replace('/wait/','/passkey/'),{id:e(c.rawId),clientDataJSON:e(r.clientDataJSON),authenticatorData:e(r.authenticatorData),signature:e(r.signature)});
+  if(ok)location.reload();else say('Refused: '+t);
+}catch(x){say('Cancelled or failed: '+x.message)}}
+document.getElementById('go').onclick=go;`);
+      }
       if (v === 'pending') {
         return loginPage(res, 'Approve on your phone',
           `<p>shipmate sent an <b>Approve</b> button to your phone. It only works from a device on your tailnet.</p>` +
@@ -846,6 +1046,12 @@ async function serveOnboard(port) {
       res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
       return res.end(html);
     }
+    // Tailnet-only: being on this page is the authority to add a passkey to the public sign-in.
+    if (req.method === 'GET' && url === '/passkey') {
+      const pub = publicUrl();
+      if (!pub) { res.writeHead(503, { 'Content-Type': 'text/plain' }); return res.end('Public URL unknown yet: start Funnel and open the connector once, or set SHIPMATE_PUBLIC_URL.'); }
+      res.writeHead(302, { Location: `${pub}/passkey/enroll/${mintEnrollToken()}` }); return res.end();
+    }
     if (req.method === 'GET' && url === '/dashboard') {
       res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
       return res.end(dashHtml);
@@ -916,7 +1122,20 @@ async function serveOnboard(port) {
 const argv = process.argv.slice(2);
 if (argv[0] === '--approve-login') cliLoginDecision(argv[1], 'approved');
 else if (argv[0] === '--deny-login') cliLoginDecision(argv[1], 'denied');
-else if (argv[0] === '--revoke-all') {
+else if (argv[0] === '--enroll-passkey') {
+  const pub = publicUrl();
+  if (!pub) { console.log('Public URL unknown: set SHIPMATE_PUBLIC_URL or open the connector once through Funnel.'); process.exit(1); }
+  const link = `${pub}/passkey/enroll/${mintEnrollToken()}`;
+  try { if (process.env.SHIPMATE_NO_CLIPBOARD) throw new Error('print'); require('child_process').execFileSync('pbcopy', { input: link }); console.log('Enrollment link copied to the clipboard (one use, 10 minutes). Open it on the device that will hold the passkey.'); }
+  catch { console.log(link); }
+} else if (argv[0] === '--passkeys') {
+  const list = loadPasskeys();
+  console.log(list.length ? list.map((k) => `${k.id.slice(0, 10)}  ${k.name}  ${k.alg === -7 ? 'ES256' : 'RS256'}  added ${new Date(k.created * 1000).toISOString().slice(0, 10)}  last used ${k.lastUsed ? new Date(k.lastUsed * 1000).toISOString().slice(0, 10) : 'never'}`).join('\n') : 'no passkeys — sign-in uses the phone tap');
+} else if (argv[0] === '--remove-passkey') {
+  const list = loadPasskeys(), keep = list.filter((k) => !argv[1] || !k.id.startsWith(argv[1]));
+  if (!argv[1] || keep.length === list.length) { console.log('usage: --remove-passkey <id prefix from --passkeys>'); process.exit(1); }
+  savePasskeys(keep); audit('passkey_removed', { passkey: argv[1].slice(0, 8) }); console.log(`removed ${list.length - keep.length} passkey(s)`);
+} else if (argv[0] === '--revoke-all') {
   const db = oauthLoad(); const n = Object.keys(db.access).length + Object.keys(db.refresh).length;
   db.access = {}; db.refresh = {}; db.codes = {}; oauthSave(db); audit('revoke_all', { tokens: n });
   console.log(`revoked ${n} token(s); every client must sign in again`);
