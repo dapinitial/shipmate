@@ -11,6 +11,7 @@
  *     approval by a tailnet-only tap). See mcp/README.md.
  *   Admin (on the host):    --approve-login <CODE> · --deny-login <CODE> · --grants · --revoke-all
  *                           --enroll-passkey · --passkeys · --remove-passkey <id>
+ *                           --enroll-totp · --totp-status · --remove-totp
  *
  * Tools (both transports):
  *   shipmate_plan      — describe what a request would do + cost. Read-only, always safe.
@@ -500,6 +501,57 @@ function passkeyAssert(body, challenge, origin) {
   return k;
 }
 
+// ---- authenticator-app codes (TOTP, RFC 6238) ------------------------------------------------
+//
+// For owners whose authenticator app (Microsoft Authenticator, Google Authenticator, 1Password…)
+// is where their second factors live. Enrolled through the same one-time link as a passkey; the
+// QR code is drawn on the server (vendored qrcode-generator, MIT) and the secret never leaves
+// that page. Codes: SHA-1, 6 digits, 30 s, ±1 step for clock drift, never reusable (the last
+// accepted step is stored), five tries per sign-in. Weaker than a passkey (a convincing fake page
+// could ask for a code), far stronger than a push any tailnet device could tap.
+
+const TOTP_FILE = path.join(STATE_DIR, 'totp.json');
+const B32 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+function base32(buf) {
+  let bits = 0, val = 0, out = '';
+  for (const b of buf) { val = (val << 8) | b; bits += 8; while (bits >= 5) { out += B32[(val >>> (bits - 5)) & 31]; bits -= 5; } }
+  if (bits > 0) out += B32[(val << (5 - bits)) & 31];
+  return out;
+}
+function unbase32(s) {
+  let bits = 0, val = 0; const out = [];
+  for (const ch of String(s).toUpperCase().replace(/[^A-Z2-7]/g, '')) {
+    val = (val << 5) | B32.indexOf(ch); bits += 5;
+    if (bits >= 8) { out.push((val >>> (bits - 8)) & 255); bits -= 8; }
+  }
+  return Buffer.from(out);
+}
+function totpAt(secretB32, step) {
+  const msg = Buffer.alloc(8); msg.writeUInt32BE(Math.floor(step / 2 ** 32), 0); msg.writeUInt32BE(step >>> 0, 4);
+  const h = crypto.createHmac('sha1', unbase32(secretB32)).update(msg).digest();
+  const o = h[h.length - 1] & 15;
+  return String(((h.readUInt32BE(o) & 0x7fffffff) % 1e6)).padStart(6, '0');
+}
+const totpStep = () => Math.floor(Date.now() / 1000 / 30);
+// Returns the matching step, or -1. Rejects any step at or before the last one accepted.
+function totpMatch(secretB32, code, lastStep) {
+  code = String(code || '').replace(/\s/g, '');
+  if (!/^\d{6}$/.test(code)) return -1;
+  const s0 = totpStep();
+  for (const st of [s0, s0 - 1, s0 + 1]) {
+    if (st <= (lastStep || 0)) continue;
+    if (crypto.timingSafeEqual(Buffer.from(totpAt(secretB32, st)), Buffer.from(code))) return st;
+  }
+  return -1;
+}
+const loadTotp = () => readJson(TOTP_FILE, null);
+const totpEnrolled = () => { const t = loadTotp(); return !!(t && t.confirmed); };
+function qrSvg(text) {
+  const qrcode = require(path.join(__dirname, 'vendor', 'qrcode.js'));
+  const q = qrcode(0, 'M'); q.addData(text); q.make();
+  return q.createSvgTag({ cellSize: 6, margin: 4, scalable: false });
+}
+
 // ---- sign-in approval (reuses the tap-to-confirm channel) ----------------------------------
 
 const logins = new Map(); // pollId → { nonce, userCode, q, exp, passkey, challenge, access }
@@ -634,6 +686,35 @@ function serveHttp(port) {
     const resource = `${base}/mcp`;
     if (base.startsWith('https://') && publicUrl() !== base) { try { fs.writeFileSync(PUBLIC_URL_FILE, base + '\n', { mode: 0o600 }); } catch {} }
 
+    // -- authenticator-app enrollment: same one-time link, /totp/enroll/<token> --------------
+    const te = p.match(/^\/totp\/enroll\/([A-Za-z0-9_-]{20,40})$/);
+    if (te) {
+      if (!enrollTokenValid(te[1], false)) return loginPage(res, 'Link expired', '<p>Enrollment links work once, for 10 minutes. Make a new one from the onboarding page or with <code>--enroll-totp</code>.</p>');
+      const pend = enrollChallenges.get('totp:' + sha(te[1])) || { secret: base32(crypto.randomBytes(20)), exp: now() + ENROLL_TTL_S, tries: 0 };
+      enrollChallenges.set('totp:' + sha(te[1]), pend);
+      const host = new URL(base).hostname;
+      const uri = `otpauth://totp/shipmate:${encodeURIComponent(host.split('.')[0])}?secret=${pend.secret}&issuer=shipmate&algorithm=SHA1&digits=6&period=30`;
+      const show = (msg) => loginPage(res, 'Add shipmate to your authenticator app',
+        `<p>Scan this with Microsoft Authenticator (or any authenticator app): <b>+</b> → <b>Other account</b> → scan.</p>` +
+        `<div style="background:#fff;display:inline-block;padding:.5rem">${qrSvg(uri)}</div>` +
+        `<p class="muted">Can't scan? Choose "enter code manually" with account <b>shipmate</b> and key<br><code style="font-size:.95rem;word-break:break-all">${esc(pend.secret.replace(/(.{4})/g, '$1 ').trim())}</code></p>` +
+        `<form method="post"><p><label>Then type the 6-digit code it shows<br><input name="code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9 ]{6,7}" maxlength="7" style="font:600 1.4rem ui-monospace,Menlo,monospace;width:8ch" autofocus required></label></p>` +
+        `<p><button style="font-size:1.05rem;padding:.5rem 1rem">Confirm</button></p></form>` + (msg ? `<p><b>${esc(msg)}</b></p>` : ''));
+      if (req.method === 'GET') return show('');
+      if (req.method === 'POST') {
+        const f = parseForm(await readBody(req, 4096), req.headers['content-type']);
+        if (++pend.tries > 5) { enrollChallenges.delete('totp:' + sha(te[1])); enrollTokenValid(te[1], true);
+          audit('totp_enroll_refused', { why: 'too many wrong codes' }); return loginPage(res, 'Too many wrong codes', '<p>Make a new enrollment link and start over.</p>'); }
+        const st = totpMatch(pend.secret, f.code, 0);
+        if (st < 0) { audit('totp_enroll_refused', { why: 'wrong code' }); return show("That code didn't match. Check the phone's clock is automatic, then try the current code."); }
+        writeJson(TOTP_FILE, { secret: pend.secret, confirmed: true, created: now(), lastStep: st });
+        enrollTokenValid(te[1], true); enrollChallenges.delete('totp:' + sha(te[1]));
+        audit('totp_enrolled', {});
+        return loginPage(res, 'Authenticator added', '<p>Sign-ins to shipmate now ask for a code from your authenticator app (or your passkey, if you have one).</p>');
+      }
+      res.writeHead(405); return res.end();
+    }
+
     // -- passkey enrollment: one-time link from the tailnet page or the host -------------------
     const en = p.match(/^\/passkey\/enroll\/([A-Za-z0-9_-]{20,40})$/);
     if (en) {
@@ -740,13 +821,33 @@ document.getElementById('go').onclick=async()=>{try{
       if (pending >= 3 || loginRate.length >= 10) return back('temporarily_unavailable');
       loginRate.push(t);
       const access = scope.includes('shipmate:execute') ? 'full access (can ship)' : 'read-only';
-      const usePasskey = loadPasskeys().length > 0;
-      const { nonce, userCode, pushed } = requestLoginApproval(`Sign in "${client.name}" to shipmate — ${access}`, !usePasskey);
+      const usePasskey = loadPasskeys().length > 0, useTotp = totpEnrolled();
+      const { nonce, userCode, pushed } = requestLoginApproval(`Sign in "${client.name}" to shipmate — ${access}`, !usePasskey && !useTotp);
       const pollId = rand(18);
       logins.set(pollId, { nonce, userCode, exp: t + LOGIN_TTL_S, q: { ...q, scope: scope.join(' ') },
-        passkey: usePasskey, challenge: rand(32), access });
-      audit('authorize_requested', { client: q.client_id.slice(0, 8), name: client.name, scope: scope.join(' '), pushed, passkey: usePasskey });
+        passkey: usePasskey, totp: useTotp, totpTries: 0, challenge: rand(32), access });
+      audit('authorize_requested', { client: q.client_id.slice(0, 8), name: client.name, scope: scope.join(' '), pushed, passkey: usePasskey, totp: useTotp });
       res.writeHead(302, { Location: `/authorize/wait/${pollId}` }); return res.end();
+    }
+    const tp = p.match(/^\/authorize\/totp\/([A-Za-z0-9_-]{16,40})$/);
+    if (tp && req.method === 'POST') {
+      const l = logins.get(tp[1]), f = parseForm(await readBody(req, 4096), req.headers['content-type']);
+      const waitUrl = `/authorize/wait/${tp[1]}`;
+      if (!l || l.exp < now() || !l.totp) return loginPage(res, 'Sign-in expired', '<p>Start again from Claude.</p>');
+      if (++l.totpTries > 5) {
+        logins.delete(tp[1]); audit('totp_signin_refused', { why: 'too many wrong codes', client: l.q.client_id.slice(0, 8) });
+        return loginPage(res, 'Too many wrong codes', '<p>This sign-in is cancelled. Start again from Claude.</p>');
+      }
+      const t = loadTotp(), st = t && t.confirmed ? totpMatch(t.secret, f.code, t.lastStep) : -1;
+      if (st < 0) {
+        audit('totp_signin_refused', { why: 'wrong or reused code', client: l.q.client_id.slice(0, 8) });
+        res.writeHead(303, { Location: waitUrl + '?e=1' }); return res.end();
+      }
+      t.lastStep = st; writeJson(TOTP_FILE, t); // that code (and every earlier one) is now spent
+      const file = path.join(APPROVALS, l.nonce), lines = fs.readFileSync(file, 'utf8').split('\n');
+      fs.writeFileSync(file, [`approved ${now()}`, ...lines.slice(1)].join('\n'), { mode: 0o600 });
+      audit('totp_signin', { client: l.q.client_id.slice(0, 8) });
+      res.writeHead(303, { Location: waitUrl }); return res.end();
     }
     const pk = p.match(/^\/authorize\/passkey\/([A-Za-z0-9_-]{16,40})$/);
     if (pk && req.method === 'POST') {
@@ -773,10 +874,20 @@ document.getElementById('go').onclick=async()=>{try{
       const l = logins.get(wait[1]);
       if (!l || l.exp < now()) { logins.delete(wait[1]); return loginPage(res, 'Sign-in expired', '<p>Start again from Claude.</p>'); }
       const v = loginVerdict(l.nonce);
+      const totpForm = l.totp
+        ? `<form method="post" action="${esc(p.replace('/wait/', '/totp/'))}"><p><label>${l.passkey ? 'Or enter' : 'Enter'} the 6-digit code from your authenticator app<br>` +
+          `<input name="code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9 ]{6,7}" maxlength="7" style="font:600 1.4rem ui-monospace,Menlo,monospace;width:8ch" ${l.passkey ? '' : 'autofocus'} required></label></p>` +
+          `<p><button style="font-size:1.05rem;padding:.5rem 1rem">Sign in</button></p></form>` + (u.searchParams.get('e') ? `<p><b>That code didn't work. Try the current one.</b></p>` : '')
+        : '';
+      if (v === 'pending' && l.totp && !l.passkey) {
+        return loginPage(res, 'Sign in to shipmate',
+          `<p><b>${esc((oauthLoad().clients[l.q.client_id] || {}).name || 'An app')}</b> is asking for ${esc(l.access)}.</p>` + totpForm +
+          `<p class="muted">Lost your phone? On the Mac that runs shipmate: <code style="font-size:.85rem">node mcp/shipmate-mcp.js --approve-login ${esc(l.userCode)}</code></p>`);
+      }
       if (v === 'pending' && l.passkey) {
         return loginPage(res, 'Sign in to shipmate',
           `<p><b>${esc(l.q.client_id && (oauthLoad().clients[l.q.client_id] || {}).name || 'An app')}</b> is asking for ${esc(l.access)}.</p>` +
-          `<p><button id="go" style="font-size:1.05rem;padding:.6rem 1.1rem">Sign in with passkey</button></p><p id="msg" class="muted"></p>` +
+          `<p><button id="go" style="font-size:1.05rem;padding:.6rem 1.1rem">Sign in with passkey</button></p><p id="msg" class="muted"></p>` + totpForm +
           `<p class="muted">Lost your passkey? On the Mac that runs shipmate: <code style="font-size:.85rem">node mcp/shipmate-mcp.js --approve-login ${esc(l.userCode)}</code></p>`,
           false, `${WEBAUTHN_JS}
 const o=${JSON.stringify({ challenge: l.challenge, rpId: new URL(base).hostname, allow: loadPasskeys().map((k) => k.id) })};
@@ -1047,10 +1158,10 @@ async function serveOnboard(port) {
       return res.end(html);
     }
     // Tailnet-only: being on this page is the authority to add a passkey to the public sign-in.
-    if (req.method === 'GET' && url === '/passkey') {
+    if (req.method === 'GET' && (url === '/passkey' || url === '/totp')) {
       const pub = publicUrl();
       if (!pub) { res.writeHead(503, { 'Content-Type': 'text/plain' }); return res.end('Public URL unknown yet: start Funnel and open the connector once, or set SHIPMATE_PUBLIC_URL.'); }
-      res.writeHead(302, { Location: `${pub}/passkey/enroll/${mintEnrollToken()}` }); return res.end();
+      res.writeHead(302, { Location: `${pub}${url}/enroll/${mintEnrollToken()}` }); return res.end();
     }
     if (req.method === 'GET' && url === '/dashboard') {
       res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
@@ -1128,6 +1239,17 @@ else if (argv[0] === '--enroll-passkey') {
   const link = `${pub}/passkey/enroll/${mintEnrollToken()}`;
   try { if (process.env.SHIPMATE_NO_CLIPBOARD) throw new Error('print'); require('child_process').execFileSync('pbcopy', { input: link }); console.log('Enrollment link copied to the clipboard (one use, 10 minutes). Open it on the device that will hold the passkey.'); }
   catch { console.log(link); }
+} else if (argv[0] === '--enroll-totp') {
+  const pub = publicUrl();
+  if (!pub) { console.log('Public URL unknown: set SHIPMATE_PUBLIC_URL or open the connector once through Funnel.'); process.exit(1); }
+  const link = `${pub}/totp/enroll/${mintEnrollToken()}`;
+  try { if (process.env.SHIPMATE_NO_CLIPBOARD) throw new Error('print'); require('child_process').execFileSync('pbcopy', { input: link }); console.log('Authenticator enrollment link copied to the clipboard (one use, 10 minutes). Open it on a screen your phone can scan.'); }
+  catch { console.log(link); }
+} else if (argv[0] === '--totp-status') {
+  const t = loadTotp();
+  console.log(t && t.confirmed ? `authenticator app enrolled ${new Date(t.created * 1000).toISOString().slice(0, 10)}` : 'no authenticator app enrolled');
+} else if (argv[0] === '--remove-totp') {
+  try { fs.unlinkSync(TOTP_FILE); audit('totp_removed', {}); console.log('authenticator app removed'); } catch { console.log('no authenticator app enrolled'); }
 } else if (argv[0] === '--passkeys') {
   const list = loadPasskeys();
   console.log(list.length ? list.map((k) => `${k.id.slice(0, 10)}  ${k.name}  ${k.alg === -7 ? 'ES256' : 'RS256'}  added ${new Date(k.created * 1000).toISOString().slice(0, 10)}  last used ${k.lastUsed ? new Date(k.lastUsed * 1000).toISOString().slice(0, 10) : 'never'}`).join('\n') : 'no passkeys — sign-in uses the phone tap');

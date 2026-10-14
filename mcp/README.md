@@ -33,8 +33,16 @@ From then on the sign-in page has one button, **Sign in with passkey**. The brow
 one-time challenge with a key bound to this server's address, so a lookalike site can't use it,
 and biometrics (or the device passcode) are required, not just a tap.
 
-Until a passkey exists, sign-in falls back to an **Approve / Deny** push whose buttons only work
-from your tailnet. Once one exists, that push is off. On the Mac, this always works:
+**Or an authenticator app.** Microsoft Authenticator, Google Authenticator or 1Password: open
+`http://<tailnet-ip>:8790/totp` on your Mac (or run `--enroll-totp` and open the copied link), scan
+the QR code with your phone, type one code to confirm. Sign-in then asks for the 6-digit code.
+Codes allow ±30 s of clock drift, can't be reused, and five wrong ones cancel the sign-in. The
+QR code is drawn on the server (`mcp/vendor/qrcode.js`, MIT, vendored) and the secret is shown
+only on that one-time page. `--totp-status`, `--remove-totp`. A passkey is stronger (a fake page
+can't phish it); the app is the choice when your factors already live there.
+
+Until a passkey or an authenticator app exists, sign-in falls back to an **Approve / Deny** push whose buttons only work
+from your tailnet. Once either exists, that push is off. On the Mac, this always works:
 
 ```bash
 node mcp/shipmate-mcp.js --approve-login ABC-123
@@ -61,7 +69,7 @@ Admin on the host: `--grants` lists sign-ins, `--revoke-all` signs every client 
 `tailscale funnel --https=443 off` removes public access entirely. The pre-OAuth URL token
 (`/mcp/<token>`) is revoked: the server deletes it on start and that path is a 404.
 `tests/test_mcp_auth.sh` runs a real server and attacks the boundary, including a simulated
-authenticator for passkeys (92 assertions).
+authenticator for passkeys and RFC 6238 codes for the app (118 assertions).
 
 ## Tools
 

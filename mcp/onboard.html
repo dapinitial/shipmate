@@ -85,11 +85,14 @@
       <p>Nothing to configure — the shipmate connector lives on your Claude <i>account</i>.
       Open the Claude app → new chat → enable the shipmate connector → tap voice mode → talk
       to your fleet.</p></div>
-    <div class="card"><h2><span class="n">6</span>Passkey for sign-in</h2>
+    <div class="card"><h2><span class="n">6</span>Sign-in: passkey or authenticator app</h2>
       <p>Signing in to the shipmate connector uses a passkey: Face ID or Touch ID, bound to this
       server, so it can't be phished and nothing has to reach your phone. Open this link on the
       device that should hold the passkey. It makes a one-time enrollment link, good for 10 minutes.</p>
       <p><a class="btn" href="/passkey">Add a passkey on this device →</a></p>
+      <p><b>Or use your authenticator app</b> (Microsoft Authenticator, Google Authenticator, 1Password):
+      open this on your Mac and scan the QR code with your phone.</p>
+      <p><a class="btn" href="/totp">Set up an authenticator app →</a></p>
       <p class="muted">Lost it? On the Mac: <code>node mcp/shipmate-mcp.js --passkeys</code>, then
       <code>--remove-passkey &lt;id&gt;</code>. <code>--approve-login &lt;code&gt;</code> always works on the Mac.</p>
     </div>

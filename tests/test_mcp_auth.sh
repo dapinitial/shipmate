@@ -243,10 +243,53 @@ async function signIn(clientId, scope, verdict = 'approved') {
   ok('remove passkey', cli('--remove-passkey', b64url(credId).slice(0, 6)), 'removed 1 passkey(s)');
   ok('back to the phone tap', cli('--passkeys'), 'no passkeys — sign-in uses the phone tap');
 
+  console.log('authenticator app (TOTP):');
+  const B32 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+  const unb32 = (s) => { let bits = 0, v = 0; const o = []; for (const ch of s.replace(/\s/g, '')) { v = (v << 5) | B32.indexOf(ch); bits += 5; if (bits >= 8) { o.push((v >>> (bits - 8)) & 255); bits -= 8; } } return Buffer.from(o); };
+  const totp = (sec, step) => { const m = Buffer.alloc(8); m.writeUInt32BE(step >>> 0, 4); const h = crypto.createHmac('sha1', unb32(sec)).update(m).digest(); const o = h[19] & 15; return String((h.readUInt32BE(o) & 0x7fffffff) % 1e6).padStart(6, '0'); };
+  const step = () => Math.floor(Date.now() / 30000);
+  ok('none enrolled', cli('--totp-status'), 'no authenticator app enrolled');
+  const tl = new URL(cli('--enroll-totp')).pathname;
+  ok('totp link minted', /^\/totp\/enroll\/[A-Za-z0-9_-]{30,}$/.test(tl), true);
+  let th = await (await req(tl)).text();
+  ok('QR drawn as SVG', /<svg[^>]*>.*<\/svg>/s.test(th), true);
+  const secret = (th.match(/<code[^>]*>([A-Z2-7 ]{20,})<\/code>/) || [])[1];
+  ok('secret shown for manual entry', !!secret, true);
+  ok('same secret on reload', (await (await req(tl)).text()).includes(secret), true);
+  const enrollCode = (c) => req(tl, form({ code: c }));
+  r = await enrollCode('000000'); ok('wrong confirm code', /That code didn&#39;t match/.test(await r.text()), true);
+  r = await enrollCode(totp(secret, step())); ok('confirm with the real code', /Authenticator added/.test(await r.text()), true);
+  ok('enrolled', /^authenticator app enrolled/.test(cli('--totp-status')), true);
+  ok('link spent', /Link expired/.test(await (await req(tl)).text()), true);
+  ok('secret not in audit log', fs.readFileSync(path.join(tmp, 'home/.shipmate/mcp/auth.log'), 'utf8').includes(secret.replace(/ /g, '')), false);
+
+  const pb = pushes.length, v2 = b64url(crypto.randomBytes(32));
+  const startLogin = async () => (await req(`/authorize?${new URLSearchParams({ response_type: 'code', client_id: client, redirect_uri: CB, state: 'tt',
+    code_challenge: b64url(crypto.createHash('sha256').update(v2).digest()), code_challenge_method: 'S256' })}`)).headers.get('location');
+  let w = await startLogin();
+  await new Promise((res) => setTimeout(res, 300));
+  ok('no push with an authenticator', pushes.length, pb);
+  ok('page asks for a code', /6-digit code from your authenticator app/.test(await (await req(w)).text()), true);
+  const sendCode = (wp, c) => req(wp.replace('/wait/', '/totp/'), form({ code: c }));
+  r = await sendCode(w, '123456'); ok('wrong code → back with error', r.headers.get('location'), w + '?e=1');
+  ok('the code used to enroll is spent', (await sendCode(w, totp(secret, step()))).headers.get('location'), w + '?e=1');
+  ok('a far-future code refused', (await sendCode(w, totp(secret, step() + 5))).headers.get('location'), w + '?e=1');
+  const next = totp(secret, step() + 1); // ±1 step allowed for clock drift
+  r = await sendCode(w, next); ok('next-window code accepted', r.headers.get('location'), w);
+  r = await req(w); const tcode = new URL(r.headers.get('location')).searchParams.get('code');
+  ok('code sign-in → authorization code', !!tcode, true);
+  w = await startLogin();
+  ok('replaying an accepted code fails', (await sendCode(w, next)).headers.get('location'), w + '?e=1');
+  for (let i = 0; i < 4; i++) await sendCode(w, '000000'); // tries 2–5 (the replay was the first)
+  r = await sendCode(w, '000000'); ok('sixth try cancels the sign-in', /Too many wrong codes/.test(await r.text()), true);
+  ok('cancelled sign-in is gone', /Sign-in expired/.test(await (await req(w)).text()), true);
+  ok('remove authenticator', cli('--remove-totp'), 'authenticator app removed');
+
   console.log('audit trail:');
   const auditLog = fs.readFileSync(path.join(tmp, 'home/.shipmate/mcp/auth.log'), 'utf8');
   for (const ev of ['register_refused', 'authorize_denied', 'token_refused', 'scope_refused', 'refresh_reuse_revoked', 'mcp_refused', 'revoke_all',
-                    'passkey_enroll_refused', 'passkey_enrolled', 'passkey_signin_refused', 'passkey_signin', 'passkey_removed'])
+                    'passkey_enroll_refused', 'passkey_enrolled', 'passkey_signin_refused', 'passkey_signin', 'passkey_removed',
+                    'totp_enroll_refused', 'totp_enrolled', 'totp_signin_refused', 'totp_signin', 'totp_removed'])
     ok(`audit has ${ev}`, auditLog.includes(`"event":"${ev}"`), true);
   ok('audit never holds a token', auditLog.includes(full.access_token) || auditLog.includes(full.refresh_token), false);
 
