@@ -41,10 +41,12 @@ const TURN_TIMEOUT_MS = 10 * 60 * 1000;
 
 const log = (...a) => console.error('[shipmate-mcp]', ...a);
 
+let CHANNEL = 'mcp-stdio'; // 'claude-app' once serving HTTP; the bridge's ledger lines carry it
+
 function bridge(args) {
   return new Promise((resolve) => {
     execFile('bash', [BRIDGE, ...args],
-      { timeout: TURN_TIMEOUT_MS, maxBuffer: 10 * 1024 * 1024 },
+      { timeout: TURN_TIMEOUT_MS, maxBuffer: 10 * 1024 * 1024, env: { ...process.env, SHIPMATE_CHANNEL: CHANNEL } },
       (err, stdout, stderr) => {
         // The bridge speaks errors on stdout by design; prefer its words over exit codes.
         const text = (stdout || '').trim() || (stderr || '').trim()
@@ -227,6 +229,17 @@ async function callTool(name, args) {
   }
 }
 
+// The decision ledger shared with the bridge (skills/deploy/lib/ledger.sh writes the same shape).
+function ledgerRecord(policy, outcome, project, attempted, detail) {
+  try {
+    const file = process.env.SHIPMATE_LEDGER || path.join(os.homedir(), '.shipmate', 'ledger.jsonl');
+    const ts = new Date().toISOString().replace(/\.\d+Z$/, 'Z');
+    const id = ts.replace(/\D/g, '').slice(0, 14) + '-' + crypto.randomBytes(3).toString('hex');
+    fs.appendFileSync(file, JSON.stringify({ id, ts, type: 'decision', policy, outcome, project,
+      attempted: String(attempted).slice(0, 400), channel: CHANNEL, detail: String(detail || '').slice(0, 400) }) + '\n', { mode: 0o600 });
+  } catch {}
+}
+
 function readOnlyCall(name, args) {
   if (READ_TOOLS.has(name)) return true;
   if (name === 'shipmate_rollback') return !(args && args.confirm === true); // describe-only is a read
@@ -261,7 +274,11 @@ async function handle(msg, ctx) {
         // Authorization: an HTTP token carries scopes; stdio (the local user) carries all.
         const scopes = (ctx && ctx.scopes) || SCOPES;
         if (!scopes.includes('shipmate:execute') && !readOnlyCall(params.name, params.arguments)) {
-          if (ctx) audit('scope_refused', { client: ctx.client, tool: params.name });
+          if (ctx) {
+            audit('scope_refused', { client: ctx.client, tool: params.name });
+            ledgerRecord('scope', 'refused', (params.arguments && params.arguments.project) || '-', params.name,
+              `read-only sign-in (client ${ctx.client})`);
+          }
           return reply({ content: [{ type: 'text', text: `${params.name} needs the shipmate:execute scope; this sign-in is read-only.` }], isError: true });
         }
         return reply(await callTool(params.name, params.arguments));
@@ -469,6 +486,7 @@ function json(res, code, obj, extra) {
 }
 
 function serveHttp(port) {
+  CHANNEL = 'claude-app';
   // The pre-OAuth URL token is revoked on startup: delete it so nothing can serve it again.
   try { fs.unlinkSync(TOKEN_FILE); log('revoked the legacy path token (http-token deleted)'); } catch {}
 
@@ -833,7 +851,7 @@ async function serveOnboard(port) {
       if (!g || g.nonce !== sh[1]) return done(404, 'no armed plan for that button (already shipped, or expired)');
       if (Date.now() - g.ts > PLAN_TTL_MS) return done(410, 'that plan expired — ask for it again');
       const child = spawn('bash', [BRIDGE, 'ship it'],
-        { env: { ...process.env, SHIPMATE_FORCE_DETACH: '1' }, detached: true, stdio: 'ignore' });
+        { env: { ...process.env, SHIPMATE_FORCE_DETACH: '1', SHIPMATE_CHANNEL: 'ship-button' }, detached: true, stdio: 'ignore' });
       child.unref();
       log(`ship-it tap for ${g.project} (nonce ${sh[1].slice(0, 8)}…)`);
       return done(200, `🚀 Shipping ${g.project} — I'll ping you when it's live.`);

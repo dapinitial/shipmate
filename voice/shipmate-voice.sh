@@ -22,6 +22,7 @@ SELF="$VOICE_DIR/$(basename "${BASH_SOURCE[0]}")"
 . "$VOICE_DIR/lib/phrase.sh"
 . "$VOICE_DIR/lib/gate.sh"
 . "$VOICE_DIR/../skills/deploy/lib/project.sh"
+. "$VOICE_DIR/../skills/deploy/lib/ledger.sh"
 . "$VOICE_DIR/../skills/deploy/lib/json.sh"
 
 # Optional config (non-secret): export SHIPMATE_NTFY_TOPIC etc. See README.md.
@@ -157,10 +158,14 @@ turn() { # <phrase> <mode:plan|execute> <project dir>
     # plan stays armed — fix the reason and say "ship it" again.
     local pf
     if ! pf="$(bash "$VOICE_DIR/../skills/deploy/bin/preflight.sh" "$project" 2>&1)"; then
+      ledger_record preflight refused "$pname" "$phrase" "$(printf '%s' "$pf" | tr '\n' ' ')" >/dev/null
       speak "Preflight stopped the ship for $pname: $(printf '%s' "$pf" | clip 300) The plan is still armed — fix that and say ship it."
       return 1
     fi
-    if ! downgraded="$(gate_take "$pname")"; then mode="plan"; fi
+    if ! downgraded="$(gate_take "$pname")"; then
+      mode="plan"
+      ledger_record plan-grant downgraded "$pname" "$phrase" "execute requested with no valid grant ($downgraded); ran as a plan" >/dev/null
+    fi
   else
     downgraded=""
   fi
@@ -214,6 +219,11 @@ turn() { # <phrase> <mode:plan|execute> <project dir>
     # Prove it: a push that reached origin becomes a deployment we can watch. Deterministic —
     # no model in the loop — and delivered as a push when the deploy is actually live.
     head_after="$(git rev-parse HEAD 2>/dev/null || true)"
+    if [ -n "$head_after" ] && [ "$head_after" != "$head_before" ]; then
+      ledger_record ship executed "$pname" "$phrase" "HEAD $(printf '%s' "$head_before" | cut -c1-7) → $(printf '%s' "$head_after" | cut -c1-7); $(git status -sb 2>/dev/null | head -1)" >/dev/null
+    else
+      ledger_record ship executed "$pname" "$phrase" "no new commit" >/dev/null
+    fi
     if [ -n "$head_after" ] && [ "$head_after" != "$head_before" ] && [ -f "$project/.do/app.yaml" ] \
        && ! git status -sb 2>/dev/null | head -1 | grep -q 'ahead'; then
       nohup bash "$SELF" --verify-live "$project" "$head_after" >/dev/null 2>&1 &
@@ -255,16 +265,19 @@ for d in ds:
         code="$(curl -s -m 15 -o /dev/null -w '%{http_code}' "$url" 2>/dev/null)"; [ -n "$code" ] || code=000
         expect="$(project_expect_text "$project")"
         if [ "$code" = 200 ] && [ -n "$expect" ] && ! curl -s -m 15 "$url" 2>/dev/null | grep -q -F -- "$expect"; then
+          ledger_record verify-live warned "$name" "deploy $short" "ACTIVE, $url 200 but missing expected text" >/dev/null
           notify "⚠️ $name: deploy $short is ACTIVE and $url answers 200, but the page doesn't contain \"$expect\" — say 'roll back $name, confirm' if that's wrong."
-        elif [ "$code" = 200 ]; then notify "✅ $name is live: $short — $url"
-        else notify "⚠️ $name: deploy $short is ACTIVE but $url answered HTTP $code — say 'roll back $name, confirm' if it looks wrong."; fi
+        elif [ "$code" = 200 ]; then ledger_record verify-live live "$name" "deploy $short" "$url 200" >/dev/null; notify "✅ $name is live: $short — $url"
+        else ledger_record verify-live warned "$name" "deploy $short" "ACTIVE but $url answered HTTP $code" >/dev/null; notify "⚠️ $name: deploy $short is ACTIVE but $url answered HTTP $code — say 'roll back $name, confirm' if it looks wrong."; fi
         return 0 ;;
       ERROR|CANCELED)
+        ledger_record verify-live failed "$name" "deploy $short" "deployment $phase" >/dev/null
         notify "❌ $name: deploy of $short $phase — the previous version is still live. Say 'roll back $name, confirm' to be sure, or fix and ship again."
         return 0 ;;
     esac
     sleep 20; waited=$((waited + 20))
   done
+  ledger_record verify-live failed "$name" "deploy $short" "not live after $((limit / 60)) minutes" >/dev/null
   notify "⏳ $name: deploy of $short still not live after $((limit / 60)) minutes — check the dashboard."
 }
 

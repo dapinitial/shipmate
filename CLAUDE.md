@@ -45,9 +45,12 @@ inject env safely), **url** (the live URL), **allowlist/auth** (wire the app's s
 - `skills/deploy/bin/` — `doctor.sh`, `do-provision.sh`, `do-app.sh`, `vercel-provision.sh`,
   `supabase-allowlist.sh`, `request-approval.sh` (tap-to-confirm for new spend),
   `deploy-card.sh` (derived "## Deploy (shipmate)" block for a repo's CLAUDE.md + fleet drift check),
-  `preflight.sh` (deterministic checks before an execute turn), `install-hooks.sh` (the pre-push guard)
+  `preflight.sh` (deterministic checks before an execute turn), `install-hooks.sh` (the pre-push guard),
+  `ledger.sh` (report/annotate the decision ledger)
 - `skills/deploy/lib/project.sh` — per-project `.shipmate.yml` (deploy remote, branch, file cap,
-  protected paths, health URL) · `lib/pre-push.hook` — the guard installed per clone
+  protected paths, health URL) · `lib/pre-push.hook` — the guard installed per clone ·
+  `lib/ledger.sh` — every gate decision appended to `~/.shipmate/ledger.jsonl` (facts only;
+  consequences are human notes added with `bin/ledger.sh annotate`, never inferred)
 - `skills/deploy/lib/envspec.sh` — the tested, security-critical env classifier
 - `tests/` — run every `tests/test_*.sh` · `voice/` — the voice bridge (bridge + tested phrase
   parser in `voice/lib/`) · `mcp/` — the MCP server over the same engine · `docs/` —
@@ -55,7 +58,7 @@ inject env safely), **url** (the live URL), **allowlist/auth** (wire the app's s
 - `install.sh` — link skills into `~/.claude/skills` + enable the secret hook
 
 ## Before you commit
-- [ ] every `tests/test_*.sh` green (env classifier, phrase parser, gate, deploy card, guardrails, MCP auth)
+- [ ] every `tests/test_*.sh` green (env classifier, phrase parser, gate, deploy card, guardrails, MCP auth, ledger)
 - [ ] `bash skills/deploy/bin/doctor.sh` sane on your machine
 - [ ] no secret value in any committed file (the pre-commit hook enforces this)
 - [ ] no hardcoded usernames/refs — derived from context

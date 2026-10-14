@@ -6,13 +6,18 @@
 # Bypass, deliberately and visibly:  SHIPMATE_ALLOW=1 git push …   (never --no-verify by an agent)
 set -uo pipefail
 remote="$1"; url="${2:-}"
-[ "${SHIPMATE_ALLOW:-}" = 1 ] && exit 0
 LIB="__SHIPMATE_LIB__"
+[ -f "$LIB/ledger.sh" ] && . "$LIB/ledger.sh" || ledger_record() { :; }
+if [ "${SHIPMATE_ALLOW:-}" = 1 ]; then   # a deliberate human override is allowed — and on the record
+  ledger_record pre-push:override overridden "$(basename "$(git rev-parse --show-toplevel)")" "git push $remote" "SHIPMATE_ALLOW=1" >/dev/null
+  exit 0
+fi
 if [ -f "$LIB/project.sh" ]; then . "$LIB/project.sh"; else
   echo "shipmate pre-push: library missing at $LIB — reinstall with install-hooks.sh (allowing push)"; exit 0; fi
 root="$(git rev-parse --show-toplevel)"
 want="$(project_deploy_remote "$root")"
 if [ "$remote" != "$want" ] && [ "$url" != "$(git remote get-url "$want" 2>/dev/null)" ]; then
+  ledger_record pre-push:remote refused "$(basename "$(git rev-parse --show-toplevel)")" "git push $remote" "deploy remote is $want" >/dev/null
   echo "✗ shipmate: this project deploys from '$want'; refusing to push to '$remote' ($url)."
   echo "  If you really mean it: SHIPMATE_ALLOW=1 git push $remote …"
   exit 1
@@ -25,12 +30,14 @@ while read -r lref lsha rref rsha; do
   files="$(git diff --name-only "$base" "$lsha" 2>/dev/null)"
   n="$(printf '%s\n' "$files" | awk 'NF' | wc -l | tr -d ' ')"
   if [ "$n" -gt "$cap" ]; then
+    ledger_record pre-push:max-files refused "$(basename "$root")" "git push ${rref#refs/heads/}" "$n files changed; cap $cap" >/dev/null
     echo "✗ shipmate: pushing ${rref#refs/heads/} would change $n files; this project's cap is $cap (.shipmate.yml max_files)."
     echo "  Split the change, or push deliberately: SHIPMATE_ALLOW=1 git push …"; bad=1
   fi
   while IFS= read -r f; do
     [ -n "$f" ] || continue
     if project_is_protected "$root" "$f"; then
+      ledger_record pre-push:protected refused "$(basename "$root")" "git push ${rref#refs/heads/}" "touches $f" >/dev/null
       echo "✗ shipmate: '$f' is a protected path (.shipmate.yml protected / secrets default); refusing to push it."; bad=1
     fi
   done <<EOF

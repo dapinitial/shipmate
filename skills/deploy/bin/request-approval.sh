@@ -13,6 +13,7 @@
 # Exit code is 0 only for APPROVED, so `request-approval.sh "..." && <the billable step>`
 # is the natural calling shape.
 set -euo pipefail
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../lib/ledger.sh"
 case "${1:-}" in -h|--help|"") sed -n '2,15p' "$0"; exit 0;; esac
 
 DESC="$1"
@@ -56,10 +57,11 @@ WAITED=0
 while [ "$WAITED" -lt "$TIMEOUT" ]; do
   STATE="$(awk 'NR==1{print $1}' "$APPROVALS/$NONCE" 2>/dev/null || echo missing)"
   case "$STATE" in
-    approved) echo "APPROVED"; exit 0 ;;
-    denied)   echo "DENIED";   exit 1 ;;
+    approved) ledger_record approval approved "$(basename "$PWD")" "$DESC" "tapped after ${WAITED}s" >/dev/null; echo "APPROVED"; exit 0 ;;
+    denied)   ledger_record approval denied "$(basename "$PWD")" "$DESC" "tapped after ${WAITED}s" >/dev/null; echo "DENIED"; exit 1 ;;
   esac
   sleep 5; WAITED=$((WAITED + 5))
 done
+ledger_record approval timeout "$(basename "$PWD")" "$DESC" "no tap within ${TIMEOUT}s" >/dev/null
 echo "TIMEOUT"
 exit 1
