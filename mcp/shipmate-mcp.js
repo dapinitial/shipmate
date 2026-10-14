@@ -415,19 +415,29 @@ function requestLoginApproval(desc) {
   fs.mkdirSync(APPROVALS, { recursive: true });
   fs.writeFileSync(path.join(APPROVALS, nonce), `pending ${now()}\n${desc} — code ${userCode}\nlogin ${userCode}\n`, { mode: 0o600 });
   const topic = readNtfyTopic(), ip = tailnetIp();
+  let pushed = false;
   if (topic && ip) {
-    const port = process.env.SHIPMATE_ONBOARD_PORT || '8790';
-    const req = require('https').request(`${process.env.SHIPMATE_NTFY_URL || 'https://ntfy.sh'}/${topic}`, {
-      method: 'POST', timeout: 10000,
-      headers: {
-        Title: 'shipmate sign-in', Priority: 'high',
-        Actions: `http, ✅ Approve, http://${ip}:${port}/approve/${nonce}, method=POST, clear=true; ` +
-                 `http, ❌ Deny, http://${ip}:${port}/deny/${nonce}, method=POST, clear=true`,
-      },
-    });
-    req.on('error', () => {}); req.end(`${desc}\nCode on screen: ${userCode}. Only approve if you just started this.`);
+    // A failed push must never take the server down: the page also offers --approve-login.
+    // Header values must be Latin-1 for node's http client, so the button labels are plain text.
+    try {
+      const port = process.env.SHIPMATE_ONBOARD_PORT || '8790';
+      const target = `${process.env.SHIPMATE_NTFY_URL || 'https://ntfy.sh'}/${topic}`;
+      const lib = target.startsWith('http:') ? http : require('https');
+      const req = lib.request(target, {
+        method: 'POST', timeout: 10000,
+        headers: {
+          Title: 'shipmate sign-in', Priority: 'high',
+          Actions: `http, Approve, http://${ip}:${port}/approve/${nonce}, method=POST, clear=true; ` +
+                   `http, Deny, http://${ip}:${port}/deny/${nonce}, method=POST, clear=true`,
+        },
+      });
+      req.on('error', (e) => log(`sign-in push failed: ${e.message}`));
+      req.on('timeout', () => req.destroy());
+      req.end(`${desc}\nCode on screen: ${userCode}. Only approve if you just started this.`);
+      pushed = true;
+    } catch (e) { log(`sign-in push failed: ${e.message}`); }
   }
-  return { nonce, userCode, pushed: !!(topic && ip) };
+  return { nonce, userCode, pushed };
 }
 
 function loginVerdict(nonce) {
@@ -490,9 +500,17 @@ function serveHttp(port) {
   // The pre-OAuth URL token is revoked on startup: delete it so nothing can serve it again.
   try { fs.unlinkSync(TOKEN_FILE); log('revoked the legacy path token (http-token deleted)'); } catch {}
 
-  const server = http.createServer(async (req, res) => {
+  const server = http.createServer((req, res) => {
+    route(req, res).catch((e) => {
+      log(`request failed: ${req.method} ${String(req.url).split('?')[0]}: ${e.message}`);
+      if (!res.headersSent) { res.writeHead(500, { 'Content-Type': 'text/plain' }); res.end('internal error'); }
+    });
+  });
+  async function route(req, res) {
     const u = new URL(req.url, 'http://x');
     const p = u.pathname;
+    // One line per request (path only, never query strings or headers: they can carry codes/tokens).
+    res.on('finish', () => log(`${req.method} ${p} → ${res.statusCode} (host ${req.headers.host || '-'})`));
     const base = baseUrl(req);
     if (!base) { res.writeHead(421); return res.end('misdirected request'); }
     const resource = `${base}/mcp`;
@@ -663,7 +681,7 @@ function serveHttp(port) {
     ))).filter(Boolean);
     if (!replies.length) { res.writeHead(202); return res.end(); }
     json(res, 200, Array.isArray(msg) ? replies : replies[0]);
-  });
+  }
   server.listen(port, '127.0.0.1', () => {
     log(`serving Streamable HTTP + OAuth on http://127.0.0.1:${port}/mcp`);
     log('publish with:  tailscale funnel --bg ' + port);

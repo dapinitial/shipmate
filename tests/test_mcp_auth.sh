@@ -8,18 +8,23 @@ set -uo pipefail
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 command -v node >/dev/null 2>&1 || { echo "• node not installed — skipping MCP auth tests"; exit 0; }
 TMP="$(mktemp -d 2>/dev/null || mktemp -d -t shipmate)"
-PORT="$(node -e 'const s=require("net").createServer().listen(0,"127.0.0.1",()=>{console.log(s.address().port);s.close()})')"
+freeport() { node -e 'const s=require("net").createServer().listen(0,"127.0.0.1",()=>{console.log(s.address().port);s.close()})'; }
+PORT="$(freeport)"; CAP="$(freeport)"   # CAP: a local stand-in for ntfy that captures the sign-in push
 mkdir -p "$TMP/home/.shipmate/mcp"
+printf 'SHIPMATE_NTFY_TOPIC=test-topic\n' > "$TMP/home/.shipmate/voice.env"
 printf 'legacytokenlegacytokenlegacytoken1234\n' > "$TMP/home/.shipmate/mcp/http-token"
-HOME="$TMP/home" SHIPMATE_APPROVALS_DIR="$TMP/approvals" SHIPMATE_ACCESS_TTL=3600 \
+HOME="$TMP/home" SHIPMATE_APPROVALS_DIR="$TMP/approvals" SHIPMATE_ACCESS_TTL=3600 SHIPMATE_NTFY_URL="http://127.0.0.1:$CAP" \
   node "$DIR/../mcp/shipmate-mcp.js" --http "$PORT" 2>"$TMP/server.log" &
 SRV=$!
 trap 'kill $SRV 2>/dev/null; rm -rf "$TMP"' EXIT
 for _ in $(seq 1 50); do curl -s -o /dev/null "http://127.0.0.1:$PORT/.well-known/oauth-authorization-server" && break; sleep 0.1; done
 
 HOME="$TMP/home" SHIPMATE_APPROVALS_DIR="$TMP/approvals" \
-  node - "$PORT" "$DIR/../mcp/shipmate-mcp.js" "$TMP" <<'EOF'
-const [port, server, tmp] = process.argv.slice(2);
+  node - "$PORT" "$DIR/../mcp/shipmate-mcp.js" "$TMP" "$CAP" <<'EOF'
+const [port, server, tmp, cap] = process.argv.slice(2);
+const pushes = [];
+require('http').createServer((q, s) => { let b = ''; q.on('data', (c) => b += c);
+  q.on('end', () => { pushes.push({ path: q.url, headers: q.headers, body: b }); s.end('ok'); }); }).listen(+cap, '127.0.0.1');
 const { execFileSync } = require('child_process');
 const crypto = require('crypto'), fs = require('fs'), path = require('path');
 const base = `http://127.0.0.1:${port}`;
@@ -90,6 +95,19 @@ async function signIn(clientId, scope, verdict = 'approved') {
   const denied = await signIn(client, null, 'denied');
   ok('owner deny → access_denied', denied.loc.searchParams.get('error'), 'access_denied');
   ok('state echoed', denied.loc.searchParams.get('state'), 'st8');
+
+  console.log('sign-in push (needs a tailnet address on this host):');
+  const hasTailnet = Object.values(require('os').networkInterfaces()).flat()
+    .some((a) => a && a.family === 'IPv4' && /^100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./.test(a.address));
+  if (hasTailnet) {
+    await new Promise((r) => setTimeout(r, 300));
+    const p = pushes.find((x) => x.path === '/test-topic');
+    ok('push sent to the topic', !!p, true);
+    ok('Approve button → tailnet approve URL', /http, Approve, http:\/\/100\.[\d.]+:\d+\/approve\/[a-f0-9]{24}/.test((p && p.headers.actions) || ''), true);
+    ok('Deny button present', /http, Deny, /.test((p && p.headers.actions) || ''), true);
+    ok('push body shows the code', /Code on screen: [A-Z0-9]{3}-[A-Z0-9]{3}/.test((p && p.body) || ''), true);
+  } else console.log('  • no tailnet address — push assertions skipped');
+  ok('server survived the sign-in push', (await req('/.well-known/oauth-protected-resource')).status, 200);
 
   console.log('token exchange:');
   const s1 = await signIn(client, null);
