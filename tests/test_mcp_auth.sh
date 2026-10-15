@@ -13,7 +13,9 @@ PORT="$(freeport)"; CAP="$(freeport)"   # CAP: a local stand-in for ntfy that ca
 mkdir -p "$TMP/home/.shipmate/mcp"
 printf 'SHIPMATE_NTFY_TOPIC=test-topic\n' > "$TMP/home/.shipmate/voice.env"
 printf 'legacytokenlegacytokenlegacytoken1234\n' > "$TMP/home/.shipmate/mcp/http-token"
+mkdir -p "$TMP/sites"; printf '{"id":"x","ts":"2026-10-14T00:00:00Z","type":"decision","policy":"verify-live","outcome":"live","project":"demo","attempted":"deploy abc","channel":"siri","detail":"https://demo 200"}\n' > "$TMP/ledger.jsonl"
 HOME="$TMP/home" SHIPMATE_APPROVALS_DIR="$TMP/approvals" SHIPMATE_ACCESS_TTL=3600 SHIPMATE_NTFY_URL="http://127.0.0.1:$CAP" \
+  SHIPMATE_SITES_ROOT="$TMP/sites" SHIPMATE_LEDGER="$TMP/ledger.jsonl" \
   node "$DIR/../mcp/shipmate-mcp.js" --http "$PORT" 2>"$TMP/server.log" &
 SRV=$!
 trap 'kill $SRV 2>/dev/null; rm -rf "$TMP"' EXIT
@@ -288,11 +290,54 @@ async function signIn(clientId, scope, verdict = 'approved') {
   ok('cancelled sign-in is gone', /Sign-in expired/.test(await (await req(w)).text()), true);
   ok('remove authenticator', cli('--remove-totp'), 'authenticator app removed');
 
+  console.log('glasses pairing + glance:');
+  r = await req('/glance', { method: 'OPTIONS', headers: { Origin: 'https://plugin.example', 'Access-Control-Request-Headers': 'authorization' } });
+  ok('preflight answered', r.status, 204);
+  ok('preflight allows Authorization', /Authorization/i.test(r.headers.get('access-control-allow-headers') || ''), true);
+  r = await req('/glance'); ok('glance needs a token', r.status, 401);
+  ok('401 still carries CORS', r.headers.get('access-control-allow-origin'), '*');
+  ok('CORS not on /mcp', (await req('/mcp', { method: 'POST', body: '{}' })).headers.get('access-control-allow-origin'), null);
+  const pairOut = cli('--pair-device', 'Test G2');
+  const pairCode = (pairOut.match(/: ([A-Z0-9]{4}-[A-Z0-9]{4})/) || [])[1];
+  ok('pair code minted', !!pairCode, true);
+  const pair = (c) => req('/device/pair', form({ code: c }));
+  r = await pair('ZZZZ-ZZZZ'); ok('wrong code', r.status, 400);
+  r = await pair(pairCode.toLowerCase().replace('-', ' ')); ok('code works case/sep-insensitive', r.status, 200);
+  const dev = await r.json();
+  ok('device token is read-only', dev.scope, 'shipmate:read');
+  ok('glance url returned', dev.glance_url, `${base}/glance`);
+  ok('code is single-use', (await pair(pairCode)).status, 400);
+  fs.mkdirSync(path.join(tmp, 'home/.shipmate/mcp'), { recursive: true });
+  fs.writeFileSync(path.join(tmp, 'home/.shipmate/mcp/plan-grant.json'), JSON.stringify({ project: 'demo', ts: Date.now() - 120000 }));
+  fs.appendFileSync(path.join(tmp, 'ledger.jsonl'), JSON.stringify({ id: 'h', ts: new Date().toISOString(), type: 'decision',
+    policy: 'none', outcome: 'missed', project: 'hist', attempted: 'x', channel: 'terminal', detail: 'Reconstructed from history' }) + '\n');
+  r = await req('/glance', { headers: { Authorization: `Bearer ${dev.access_token}` } });
+  ok('glance with device token', r.status, 200);
+  const g = await r.json();
+  ok('fleet is a list', Array.isArray(g.fleet), true);
+  ok('reconstructed entry flagged', g.events[0].project === 'hist' && g.events[0].reconstructed, true);
+  ok('live entries are not flagged', g.events.slice(1).some((e) => e.reconstructed), false);
+  ok('armed plan shown', JSON.stringify(g.plan), '{"project":"demo","minutesLeft":8}');
+  const led = fs.readFileSync(path.join(tmp, 'ledger.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l)).filter((x) => x.type === 'decision');
+  ok('glance = newest 5 ledger decisions, newest first', JSON.stringify(g.events.map((e) => e.ts + e.policy + e.project)),
+    JSON.stringify(led.slice(-5).reverse().map((e) => e.ts + e.policy + e.project)));
+  let o = await (await rpc(dev.access_token, 'tools/call', { name: 'shipmate_execute', arguments: { request: 'x' } })).json();
+  ok("device token can't execute", /needs the shipmate:execute scope/.test(o.result.content[0].text), true);
+  o = await (await rpc(dev.access_token, 'tools/call', { name: 'shipmate_rollback', arguments: { project: 'x', confirm: true } })).json();
+  ok("device token can't roll back", /needs the shipmate:execute scope/.test(o.result.content[0].text), true);
+  r = await req('/token', form({ grant_type: 'refresh_token', client_id: dev.client_id, refresh_token: dev.refresh_token }));
+  ok('device refresh works', r.status, 200);
+  ok('refreshed token still read-only', (await r.json()).scope, 'shipmate:read');
+  ok('device listed in grants', /Test G2/.test(cli('--grants')), true);
+  for (let i = 0; i < 5; i++) await pair('AAAA-AAA' + i);
+  const fresh = (cli('--pair-device').match(/: ([A-Z0-9]{4}-[A-Z0-9]{4})/) || [])[1];
+  ok('guessing is throttled, even for a real code', (await pair(fresh)).status, 429);
+
   console.log('audit trail:');
   const auditLog = fs.readFileSync(path.join(tmp, 'home/.shipmate/mcp/auth.log'), 'utf8');
   for (const ev of ['register_refused', 'authorize_denied', 'token_refused', 'scope_refused', 'refresh_reuse_revoked', 'mcp_refused', 'revoke_all',
                     'passkey_enroll_refused', 'passkey_enrolled', 'passkey_signin_refused', 'passkey_signin', 'passkey_removed',
-                    'totp_enroll_refused', 'totp_enrolled', 'totp_signin_refused', 'totp_signin', 'totp_removed'])
+                    'totp_enroll_refused', 'totp_enrolled', 'totp_signin_refused', 'totp_signin', 'totp_removed', 'device_paired', 'pair_refused'])
     ok(`audit has ${ev}`, auditLog.includes(`"event":"${ev}"`), true);
   ok('audit never holds a token', auditLog.includes(full.access_token) || auditLog.includes(full.refresh_token), false);
 

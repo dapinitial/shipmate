@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>shipmate</title>
+  <style>
+    :root { color-scheme: dark; --ink: #e6f3ea; --muted: #8fa497; --hud: #39ff88; --ground: #0c120f; --line: #1d2a22; }
+    body { margin: 0; padding: 1.25rem 1rem; background: var(--ground); color: var(--ink); font: 16px/1.5 -apple-system, system-ui, sans-serif; }
+    h1 { font-size: 1.1rem; margin: 0 0 .25rem; letter-spacing: .02em; }
+    p { margin: .4rem 0; } .muted { color: var(--muted); font-size: .9rem; }
+    label { display: block; margin: .75rem 0 .25rem; font-size: .9rem; color: var(--muted); }
+    input { width: 100%; box-sizing: border-box; padding: .6rem .7rem; border-radius: 8px; border: 1px solid var(--line); background: #111a15; color: var(--ink); font: inherit; }
+    #code { font: 600 1.4rem ui-monospace, Menlo, monospace; letter-spacing: .12em; text-transform: uppercase; }
+    button { margin-top: .9rem; padding: .6rem 1rem; border-radius: 8px; border: 0; background: var(--hud); color: #04140a; font: 600 1rem system-ui; }
+    button.quiet { background: transparent; color: var(--muted); border: 1px solid var(--line); }
+    #preview { margin-top: 1rem; padding: .75rem; width: 100%; max-width: 576px; box-sizing: border-box; aspect-ratio: 2 / 1;
+      background: #000; color: var(--hud); border-radius: 10px; font: 14px/1.35 ui-monospace, Menlo, monospace; white-space: pre; overflow: hidden; }
+    [hidden] { display: none !important; }
+  </style>
+</head>
+<body>
+  <h1>shipmate</h1>
+  <p class="muted">Read-only status for your glasses. Nothing here can ship.</p>
+
+  <section id="pair" hidden>
+    <form id="pair-form">
+      <label for="server">Your shipmate server</label>
+      <input id="server" type="url" placeholder="https://your-mac.your-tailnet.ts.net" required>
+      <label for="code">Pairing code (from shipmate's onboarding page → Pair your glasses)</label>
+      <input id="code" autocomplete="one-time-code" placeholder="ABCD-EFGH" maxlength="9" required>
+      <button type="submit">Pair</button>
+      <p id="pair-msg" class="muted"></p>
+    </form>
+  </section>
+
+  <section id="paired" hidden>
+    <p class="muted">On the glasses: swipe to change view · tap to refresh · double-tap for the fleet.</p>
+    <button id="unpair" class="quiet" type="button">Unpair</button>
+  </section>
+
+  <pre id="preview" aria-label="What the glasses show">SHIPMATE · …</pre>
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>

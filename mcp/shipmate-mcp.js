@@ -12,6 +12,7 @@
  *   Admin (on the host):    --approve-login <CODE> · --deny-login <CODE> · --grants · --revoke-all · --revoke-client <id>
  *                           --enroll-passkey · --passkeys · --remove-passkey <id>
  *                           --enroll-totp · --totp-status · --remove-totp
+ *                           --pair-device [name] (read-only glasses/HUD token via an 8-char code)
  *
  * Tools (both transports):
  *   shipmate_plan      — describe what a request would do + cost. Read-only, always safe.
@@ -554,6 +555,92 @@ function qrSvg(text) {
   return q.createSvgTag({ cellSize: 6, margin: 4, scalable: false });
 }
 
+// ---- glance feed + device pairing (heads-up displays: Even G2 glasses) -----------------------
+//
+// A glance is what fits on a 576×288 monochrome display: each deployable project's production
+// phase, any armed plan and its minutes left, and the last few ledger decisions. It is read-only
+// by construction: served only to tokens with shipmate:read, and no glance-side action exists.
+//
+// Glasses apps can't run a browser OAuth flow, so they pair: the owner mints an 8-character code
+// on the tailnet onboarding page (/pair) or the host (--pair-device), types it once into the app on
+// the phone, and the app trades it at POST /device/pair for a READ-ONLY access + refresh token
+// (RFC 8628 in spirit). Codes: single use, 10 minutes, 5 wrong guesses per 10 minutes server-wide.
+// CORS is open on /glance, /device/pair and /token: they are bearer- or code-authenticated, never
+// cookie-authenticated, so a foreign origin learns nothing it couldn't with curl.
+
+const PAIR_FILE = path.join(STATE_DIR, 'device-pairing.json');
+const PAIR_TTL_S = 600;
+const pairFails = [];
+function mintPairCode(name) {
+  const alphabet = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
+  let code = ''; for (const b of crypto.randomBytes(8)) code += alphabet[b % alphabet.length];
+  const db = readJson(PAIR_FILE, {}), t = now();
+  for (const k of Object.keys(db)) if (db[k].exp < t) delete db[k];
+  db[sha(code)] = { name: String(name || 'Even G2').slice(0, 40), exp: t + PAIR_TTL_S };
+  writeJson(PAIR_FILE, db);
+  return code.slice(0, 4) + '-' + code.slice(4);
+}
+function redeemPairCode(code) {
+  const norm = String(code || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+  const db = readJson(PAIR_FILE, {}), h = sha(norm), e = db[h]; // stored as the bare 8 characters
+  if (!e || e.exp < now()) return null;
+  delete db[h]; writeJson(PAIR_FILE, db);
+  return e;
+}
+
+const SITES_ROOT = process.env.SHIPMATE_SITES_ROOT || path.join(os.homedir(), 'Sites');
+const glanceCache = { ts: 0, fleet: [] };
+function deployableRepos() {
+  const out = [];
+  const scan = (dir, depth) => {
+    let names = []; try { names = fs.readdirSync(dir); } catch { return; }
+    for (const n of names) {
+      const d = path.join(dir, n);
+      try { if (!fs.statSync(d).isDirectory() || n.startsWith('.') || n === 'node_modules') continue; } catch { continue; }
+      if (fs.existsSync(path.join(d, '.git')) &&
+          (fs.existsSync(path.join(d, '.do', 'app.yaml')) || fs.existsSync(path.join(d, '.vercel', 'project.json')))) out.push(d);
+      else if (depth < 1) scan(d, depth + 1);
+    }
+  };
+  scan(SITES_ROOT, 0);
+  return out.sort();
+}
+function fleetStatus(cb) {
+  if (Date.now() - glanceCache.ts < 60000) return cb(glanceCache.fleet);
+  const appsh = path.join(__dirname, '..', 'skills', 'deploy', 'bin', 'app.sh');
+  const repos = deployableRepos();
+  if (!repos.length) return cb([]);
+  const fleet = []; let pending = repos.length;
+  for (const d of repos) {
+    execFile('bash', [appsh, 'status', d], { timeout: 20000 }, (err, stdout) => {
+      const line = (String(stdout || '').match(/^deploy:\s*(.*)$/m) || [])[1] || '';
+      const raw = line.trim().split(/\s+/)[0] || (err ? 'UNKNOWN' : '');
+      const phase = { ACTIVE: 'LIVE', READY: 'LIVE', ERROR: 'FAILED', CANCELED: 'FAILED' }[raw] || raw || 'UNKNOWN';
+      fleet.push({ name: path.basename(d), provider: fs.existsSync(path.join(d, '.do', 'app.yaml')) ? 'do' : 'vercel', phase });
+      if (--pending === 0) {
+        fleet.sort((a, b) => a.name.localeCompare(b.name));
+        glanceCache.ts = Date.now(); glanceCache.fleet = fleet; cb(fleet);
+      }
+    });
+  }
+}
+function glanceEvents(n) {
+  const file = process.env.SHIPMATE_LEDGER || path.join(os.homedir(), '.shipmate', 'ledger.jsonl');
+  let lines = []; try { lines = fs.readFileSync(file, 'utf8').trim().split('\n'); } catch {}
+  return lines.map((l) => { try { return JSON.parse(l); } catch { return null; } })
+    .filter((r) => r && r.type === 'decision').slice(-n).reverse()
+    .map((r) => ({ ts: r.ts, policy: r.policy, outcome: r.outcome, project: r.project,
+      detail: String(r.detail || '').slice(0, 80),
+      // recorded after the fact (bin/ledger.sh record): its timestamp is when it was written down
+      ...(/^reconstructed/i.test(String(r.detail || '')) ? { reconstructed: true } : {}) }));
+}
+function glancePlan() {
+  const g = readJson(PLAN_GRANT, null);
+  if (!g || !g.ts) return null;
+  const ms = g.ts + PLAN_TTL_MS - Date.now(), left = Math.ceil(ms / 60000); // "8 minutes left" for 7.9
+  return ms > 0 ? { project: g.project, minutesLeft: left } : null;
+}
+
 // ---- sign-in approval (reuses the tap-to-confirm channel) ----------------------------------
 
 const logins = new Map(); // pollId → { nonce, userCode, q, exp, passkey, challenge, access }
@@ -759,6 +846,41 @@ document.getElementById('go').onclick=async()=>{try{
         }
       }
       res.writeHead(405); return res.end();
+    }
+
+    // -- CORS for the bearer/code-authenticated endpoints a glasses app calls -----------------
+    if (['/glance', '/device/pair', '/token'].includes(p)) {
+      res.setHeader('Access-Control-Allow-Origin', '*');
+      res.setHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type');
+      res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+      res.setHeader('Access-Control-Max-Age', '600');
+      if (req.method === 'OPTIONS') { res.writeHead(204); return res.end(); }
+    }
+
+    // -- device pairing: an 8-character code from the owner → a read-only token ----------------
+    if (p === '/device/pair' && req.method === 'POST') {
+      const t = now();
+      while (pairFails.length && pairFails[0] < t - 600) pairFails.shift();
+      if (pairFails.length >= 5) return json(res, 429, { error: 'slow_down', error_description: 'too many wrong codes — wait 10 minutes' });
+      const f = parseForm(await readBody(req, 4096), req.headers['content-type']);
+      const e = redeemPairCode(f.code);
+      if (!e) { pairFails.push(t); audit('pair_refused', {}); return json(res, 400, { error: 'invalid_grant', error_description: 'unknown, used or expired pairing code' }); }
+      const db = oauthLoad(), id = rand(16);
+      db.clients[id] = { redirect_uris: [], name: e.name, created: t, device: true };
+      const out = issueTokens(db, id, 'shipmate:read', resource);
+      oauthSave(db); audit('device_paired', { client: id.slice(0, 8), name: e.name });
+      return json(res, 200, { ...out, client_id: id, glance_url: `${base}/glance` });
+    }
+
+    // -- the glance: read-only, compact, for heads-up displays --------------------------------
+    if (p === '/glance' && req.method === 'GET') {
+      const m = String(req.headers.authorization || '').match(/^Bearer\s+([A-Za-z0-9_-]{20,})$/);
+      const tok = m && oauthLoad().access[sha(m[1])];
+      if (!tok || tok.resource !== resource || !tok.scope.split(' ').includes('shipmate:read')) {
+        res.writeHead(401, { 'WWW-Authenticate': `Bearer realm="shipmate"${m ? ', error="invalid_token"' : ''}` }); return res.end();
+      }
+      return fleetStatus((fleet) => json(res, 200, {
+        generated: new Date().toISOString(), fleet, plan: glancePlan(), events: glanceEvents(5) }));
     }
 
     // -- discovery ---------------------------------------------------------------------
@@ -1160,6 +1282,15 @@ async function serveOnboard(port) {
       return res.end(html);
     }
     // Tailnet-only: being on this page is the authority to add a passkey to the public sign-in.
+    // Tailnet-only: mint a glasses pairing code (read-only device sign-in).
+    if (req.method === 'GET' && url === '/pair') {
+      const code = mintPairCode('Even G2');
+      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
+      return res.end(`<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1"><body style="font:16px system-ui;max-width:30rem;margin:12vh auto;padding:0 1rem">` +
+        `<h1 style="font-size:1.3rem">Pair your glasses</h1><p>In the shipmate app on your phone, enter:</p>` +
+        `<p style="font:600 2rem ui-monospace,Menlo,monospace;letter-spacing:.1em">${code}</p>` +
+        `<p style="color:#5a6070">Server: <code>${esc(publicUrl() || '(open the connector once so shipmate learns its address)')}</code><br>One use, 10 minutes. The glasses get read-only access: they can watch, never ship.</p></body>`);
+    }
     if (req.method === 'GET' && (url === '/passkey' || url === '/totp')) {
       const pub = publicUrl();
       if (!pub) { res.writeHead(503, { 'Content-Type': 'text/plain' }); return res.end('Public URL unknown yet: start Funnel and open the connector once, or set SHIPMATE_PUBLIC_URL.'); }
@@ -1241,6 +1372,9 @@ else if (argv[0] === '--enroll-passkey') {
   const link = `${pub}/passkey/enroll/${mintEnrollToken()}`;
   try { if (process.env.SHIPMATE_NO_CLIPBOARD) throw new Error('print'); require('child_process').execFileSync('pbcopy', { input: link }); console.log('Enrollment link copied to the clipboard (one use, 10 minutes). Open it on the device that will hold the passkey.'); }
   catch { console.log(link); }
+} else if (argv[0] === '--pair-device') {
+  console.log(`Pairing code for "${argv[1] || 'Even G2'}" (one use, 10 minutes, read-only): ${mintPairCode(argv[1])}`);
+  if (publicUrl()) console.log(`Server: ${publicUrl()}`);
 } else if (argv[0] === '--enroll-totp') {
   const pub = publicUrl();
   if (!pub) { console.log('Public URL unknown: set SHIPMATE_PUBLIC_URL or open the connector once through Funnel.'); process.exit(1); }

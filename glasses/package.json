@@ -1,0 +1,25 @@
+{
+  "name": "shipmate-glance",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Read-only shipmate status for Even Realities G2 glasses",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host",
+    "build": "tsc --noEmit && vite build",
+    "test": "node --test test/",
+    "manifest": "node scripts/manifest.mjs",
+    "sim": "evenhub-simulator http://localhost:5173",
+    "pack": "npm run manifest && npm run build && evenhub pack app.json dist -o shipmate-glance.ehpk"
+  },
+  "dependencies": {
+    "@evenrealities/even_hub_sdk": "0.0.16"
+  },
+  "devDependencies": {
+    "@evenrealities/evenhub-cli": "0.1.14",
+    "@evenrealities/evenhub-simulator": "0.9.5",
+    "typescript": "^5.6.0",
+    "vite": "^6.0.0"
+  },
+  "engines": { "node": "^20.0.0 || >=22.0.0" }
+}

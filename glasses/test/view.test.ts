@@ -1,0 +1,96 @@
+// Node's built-in test runner (types are stripped natively). The view is the whole display
+// contract, so every line it can emit is checked against the G2's limits.
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { LINE_CHARS, MAX_LINES, ago, nextView, render, says, type Glance } from '../src/view.ts';
+
+const now = new Date('2026-10-14T12:00:00Z');
+const g = (over: Partial<Glance> = {}): Glance => ({
+  generated: now.toISOString(),
+  fleet: [
+    { name: 'unakin', provider: 'do', phase: 'LIVE' },
+    { name: 'rillet-case-study', provider: 'vercel', phase: 'LIVE' },
+    { name: 'panogram', provider: 'do', phase: 'BUILDING' },
+  ],
+  plan: null, events: [], ...over,
+});
+const fits = (s: string) => {
+  const lines = s.split('\n');
+  assert.ok(lines.length <= MAX_LINES, `too many lines: ${lines.length}`);
+  for (const l of lines) assert.ok([...l].length <= LINE_CHARS, `line too long: "${l}"`);
+};
+
+test('fleet: summary, problems first, fits', () => {
+  const out = render(g(), 'fleet', now);
+  assert.match(out, /^SHIPMATE · FLEET 3\n1 deploying\n\.\. panogram/);
+  fits(out);
+  const failed = render(g({ fleet: [...g().fleet, { name: 'sedulous', provider: 'do', phase: 'FAILED' }] }), 'fleet', now);
+  assert.match(failed, /\n1 FAILED\n!! sedulous/);
+});
+
+test('fleet: all live', () => {
+  assert.match(render(g({ fleet: [{ name: 'a', provider: 'do', phase: 'LIVE' }] }), 'fleet', now), /all live\nok a/);
+});
+
+test('fleet: overflow collapses to "+N more" and still fits', () => {
+  const many = Array.from({ length: 12 }, (_, i) => ({ name: `app-${i}`, provider: 'do', phase: 'LIVE' }));
+  const out = render(g({ fleet: many }), 'fleet', now);
+  fits(out);
+  assert.match(out, /\+\d+ more$/);
+  const shown = out.split('\n').filter((l) => l.startsWith('ok ')).length;
+  assert.equal(shown + Number(out.match(/\+(\d+) more/)![1]), 12);
+});
+
+test('long names are clipped, never overflow', () => {
+  const out = render(g({ fleet: [{ name: 'an-extraordinarily-long-project-name-indeed', provider: 'do', phase: 'LIVE' }] }), 'fleet', now);
+  fits(out); assert.match(out, /…/);
+});
+
+test('plan view: armed and empty, and it never offers to ship', () => {
+  const armed = render(g({ plan: { project: 'rillet-case-study', minutesLeft: 8 } }), 'plan', now);
+  assert.match(armed, /rillet-case-study\narmed · 8 min left/);
+  assert.match(armed, /ship from phone or voice/);
+  fits(armed);
+  assert.match(render(g(), 'plan', now), /nothing armed/);
+});
+
+test('gate view: plain words, ages, newest first as given', () => {
+  const out = render(g({ events: [
+    { ts: '2026-10-14T11:59:30Z', policy: 'verify-live', outcome: 'live', project: 'rillet', detail: '' },
+    { ts: '2026-10-14T11:40:00Z', policy: 'pre-push:remote', outcome: 'refused', project: 'unakin', detail: '' },
+    { ts: '2026-10-13T08:00:00Z', policy: 'plan-grant', outcome: 'downgraded', project: 'portfolio', detail: '' },
+  ] }), 'events', now);
+  assert.equal(out.split('\n')[1], 'now rillet live');
+  assert.equal(out.split('\n')[2], '20m unakin push blocked');
+  assert.equal(out.split('\n')[3], '28h portfolio planned first');
+  fits(out);
+});
+
+test('reconstructed history is labeled, never given a fresh age', () => {
+  const out = render(g({ events: [{ ts: '2026-10-14T11:59:00Z', policy: 'verify-live', outcome: 'failed', project: 'unakin', detail: 'Reconstructed …', reconstructed: true }] }), 'events', now);
+  assert.equal(out.split('\n')[1], 'hst unakin NOT live');
+});
+
+test('says: unknown policies fall back to their raw words', () => {
+  assert.equal(says({ ts: '', policy: 'scope', outcome: 'refused', project: '', detail: '' }), 'blocked (read-only)');
+  assert.equal(says({ ts: '', policy: 'new-thing', outcome: 'odd', project: '', detail: '' }), 'new-thing odd');
+});
+
+test('error and loading states fit', () => {
+  const err = render(null, 'fleet', now, 'shipmate answered 503 because the host is asleep and offline');
+  fits(err); assert.match(err, /OFFLINE[\s\S]*tap to retry/);
+  fits(render(null, 'events', now));
+});
+
+test('ago buckets', () => {
+  assert.equal(ago('2026-10-14T11:59:00Z', now), 'now');
+  assert.equal(ago('2026-10-14T11:00:00Z', now), '60m');
+  assert.equal(ago('2026-10-14T06:00:00Z', now), '6h');
+  assert.equal(ago('2026-10-10T12:00:00Z', now), '4d');
+});
+
+test('views cycle both ways', () => {
+  assert.equal(nextView('fleet', 1), 'plan');
+  assert.equal(nextView('events', 1), 'fleet');
+  assert.equal(nextView('fleet', -1), 'events');
+});

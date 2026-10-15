@@ -57,7 +57,9 @@ inject env safely), **url** (the live URL), **allowlist/auth** (wire the app's s
   consequences are human notes added with `bin/ledger.sh annotate`, never inferred)
 - `skills/deploy/lib/envspec.sh` — the tested, security-critical env classifier
 - `tests/` — run every `tests/test_*.sh` · `voice/` — the voice bridge (bridge + tested phrase
-  parser in `voice/lib/`) · `mcp/` — the MCP server over the same engine · `docs/` —
+  parser in `voice/lib/`) · `mcp/` — the MCP server over the same engine (OAuth, passkeys, TOTP,
+  the read-only glance + device pairing) · `glasses/` — read-only Even G2 app (its own npm
+  project; `npm test` there) · `docs/` —
   vision/secrets/roadmap
 - `install.sh` — link skills into `~/.claude/skills` + enable the secret hook
 
