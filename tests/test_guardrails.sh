@@ -6,6 +6,8 @@ set -uo pipefail
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BIN="$DIR/../skills/deploy/bin"; . "$DIR/../skills/deploy/lib/project.sh"
 TMP="$(mktemp -d 2>/dev/null || mktemp -d -t shipmate)"; trap 'rm -rf "$TMP"' EXIT
+# The guard writes to the decision ledger; keep test refusals out of the real one.
+export SHIPMATE_LEDGER="$TMP/ledger.jsonl"
 export PATH="/usr/bin:/bin:/usr/local/bin:/opt/homebrew/bin"   # no doctl: preflight's live check is skipped
 export SHIPMATE_ALLOW=
 
