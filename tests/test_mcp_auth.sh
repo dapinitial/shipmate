@@ -311,10 +311,15 @@ async function signIn(clientId, scope, verdict = 'approved') {
   fs.writeFileSync(path.join(tmp, 'home/.shipmate/mcp/plan-grant.json'), JSON.stringify({ project: 'demo', ts: Date.now() - 120000 }));
   fs.appendFileSync(path.join(tmp, 'ledger.jsonl'), JSON.stringify({ id: 'h', ts: new Date().toISOString(), type: 'decision',
     policy: 'none', outcome: 'missed', project: 'hist', attempted: 'x', channel: 'terminal', detail: 'Reconstructed from history' }) + '\n');
+  const sdir = path.join(tmp, 'home/.shipmate/sentinel'); fs.mkdirSync(sdir, { recursive: true });
+  fs.writeFileSync(path.join(sdir, 'shop.site'), 'open|2|1792200000|down|https://shop 503\n');
+  fs.writeFileSync(path.join(sdir, 'shop.cert'), 'ok|1|1792200000|cert 9d|x\n');   // seen once: not open yet
+  fs.writeFileSync(path.join(sdir, 'blog.deploy'), 'ok|0|1792200000||\n');
   r = await req('/glance', { headers: { Authorization: `Bearer ${dev.access_token}` } });
   ok('glance with device token', r.status, 200);
   const g = await r.json();
   ok('fleet is a list', Array.isArray(g.fleet), true);
+  ok('only open sentinel problems are alerts', JSON.stringify(g.alerts), '[{"project":"shop","what":"down","since":"2026-10-17T01:20:00.000Z"}]');
   ok('reconstructed entry flagged', g.events[0].project === 'hist' && g.events[0].reconstructed, true);
   ok('live entries are not flagged', g.events.slice(1).some((e) => e.reconstructed), false);
   ok('armed plan shown', JSON.stringify(g.plan), '{"project":"demo","minutesLeft":8}');

@@ -62,6 +62,9 @@ elif verb == 'status':
     print(f"app:    {proj['name']} (vercel, {pid})")
     print(f"url:    {prod_url()}")
     print(f"deploy: {current.get('readyState') or 'NONE'} {sha_of(current)[:7]}")
+    # the newest production deployment, which a failed build never replaces "deploy:" with
+    newest = (deployments(1) or [{}])[0]
+    if newest.get('uid'): print(f"latest: {state_of(newest) or 'UNKNOWN'} {sha_of(newest)[:7]}")
 elif verb == 'phase':
     for x in deployments(30):
         if sha_of(x).startswith(arg):

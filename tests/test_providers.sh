@@ -81,6 +81,7 @@ echo "vercel reads:"
 out="$(VA status "$V")"
 has "status app"     "$out" "app:    demo (vercel, prj_1)"
 has "status phase"   "$out" "deploy: READY bbbbbbb"
+has "status: newest production deploy, even a failed one" "$out" "latest: ERROR eeeeeee"
 ok  "url prefers a custom domain" "$(VA url "$V")" "https://demo.example.com"
 ok  "token in header" "$(tail -1 "$TMP/requests.log" | awk '{print $2, $3}')" "Bearer test-token-123"
 ok  "team scoped"     "$(tail -1 "$TMP/requests.log" | grep -c 'teamId=team_x')" 1

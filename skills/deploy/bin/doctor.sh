@@ -49,6 +49,12 @@ if [ -d "$ROOT" ] && ls "$ROOT"/*/.do/app.yaml >/dev/null 2>&1; then
   echo "fleet ($ROOT):"
   if bash "$CARD" --check-all "$ROOT"; then ok=$((ok+1)); else bad=$((bad+1)); fi
   if bash "$(dirname "$CARD")/install-hooks.sh" --check-all "$ROOT"; then ok=$((ok+1)); else bad=$((bad+1)); fi
+  # what the sentinel last saw (no probing here; the watchdog timer runs it)
+  report="$(bash "$(dirname "$CARD")/sentinel.sh" --report)"
+  case "$report" in
+    "sentinel: nothing open") printf '  \033[32m✓\033[0m sentinel: nothing open\n'; ok=$((ok+1)) ;;
+    *) printf '  \033[31m✗\033[0m sentinel sees a problem:\n'; printf '%s\n' "$report" | sed 's/^/    /'; bad=$((bad+1)) ;;
+  esac
 fi
 
 echo

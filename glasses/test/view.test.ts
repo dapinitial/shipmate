@@ -28,6 +28,20 @@ test('fleet: summary, problems first, fits', () => {
   assert.match(failed, /\n1 FAILED\n!! sedulous/);
 });
 
+test('fleet: sentinel alerts lead, with how long', () => {
+  const out = render(g({
+    fleet: [...g().fleet, { name: 'unakin-portal', provider: 'do', phase: 'LIVE', alert: 'down', since: '2026-10-14T11:40:00Z' }],
+    alerts: [{ project: 'unakin-portal', what: 'down', since: '2026-10-14T11:40:00Z' }, { project: 'ghost', what: 'cert 9d', since: '2026-10-13T12:00:00Z' }],
+  }), 'fleet', now);
+  const lines = out.split('\n');
+  assert.equal(lines[1], '2 NEED YOU');
+  assert.equal(lines[2], '!! ghost cert 9d 24h');       // not in the fleet (status timed out): still shown
+  assert.equal(lines[3], '!! unakin-portal down 20m');
+  assert.equal(lines[4], '.. panogram');
+  fits(out);
+  assert.match(render(g({ alerts: [{ project: 'unakin', what: 'deploy failed', since: now.toISOString() }] }), 'fleet', now), /\n1 NEEDS YOU\n!! unakin deploy failed now/);
+});
+
 test('fleet: all live', () => {
   assert.match(render(g({ fleet: [{ name: 'a', provider: 'do', phase: 'LIVE' }] }), 'fleet', now), /all live\nok a/);
 });

@@ -7,7 +7,8 @@
 export type Phase = 'LIVE' | 'SUPERSEDED' | 'BUILDING' | 'PENDING' | 'FAILED' | 'UNKNOWN' | string;
 export interface Glance {
   generated: string;
-  fleet: { name: string; provider: string; phase: Phase }[];
+  fleet: { name: string; provider: string; phase: Phase; alert?: string; since?: string }[];
+  alerts?: { project: string; what: string; since: string }[]; // what the sentinel has open
   plan: { project: string; minutesLeft: number } | null;
   events: { ts: string; policy: string; outcome: string; project: string; detail: string; reconstructed?: boolean }[];
 }
@@ -44,20 +45,37 @@ export function says(e: Glance['events'][number]): string {
   return `${e.policy} ${e.outcome}`;
 }
 
+// Fleet entries with the sentinel's alerts attached; an alert for a project the fleet missed
+// (its status timed out) still gets a line.
+function withAlerts(g: Glance): Glance['fleet'] {
+  const fleet = g.fleet.map((a) => ({ ...a }));
+  for (const x of g.alerts ?? []) {
+    const a = fleet.find((f) => f.name === x.project);
+    if (!a) fleet.push({ name: x.project, provider: '?', phase: 'UNKNOWN', alert: x.what, since: x.since });
+    else if (!a.alert) { a.alert = x.what; a.since = x.since; }
+  }
+  return fleet;
+}
+
 export function render(g: Glance | null, view: View, now = new Date(), error = ''): string {
   const head = (t: string) => `SHIPMATE · ${t}`;
   if (error) return [head('OFFLINE'), '', clip(error), '', 'tap to retry'].join('\n');
   if (!g) return [head('…'), '', 'loading'].join('\n');
   const lines: string[] = [];
   if (view === 'fleet') {
-    const bad = g.fleet.filter((a) => a.phase === 'FAILED').length;
-    const busy = g.fleet.filter((a) => a.phase === 'BUILDING' || a.phase === 'PENDING').length;
-    lines.push(head(`FLEET ${g.fleet.length}`));
-    lines.push(bad ? `${bad} FAILED` : busy ? `${busy} deploying` : 'all live');
-    const order = (a: Glance['fleet'][number]) => (a.phase === 'FAILED' ? 0 : a.phase === 'BUILDING' || a.phase === 'PENDING' ? 1 : 2);
-    const shown = [...g.fleet].sort((a, b) => order(a) - order(b) || a.name.localeCompare(b.name));
+    // The sentinel's alerts lead: a site that's down outranks a deploy that failed safely.
+    const fleet = withAlerts(g);
+    const alerting = fleet.filter((a) => a.alert).length;
+    const bad = fleet.filter((a) => a.phase === 'FAILED').length;
+    const busy = fleet.filter((a) => a.phase === 'BUILDING' || a.phase === 'PENDING').length;
+    lines.push(head(`FLEET ${fleet.length}`));
+    lines.push(alerting ? `${alerting} NEED${alerting === 1 ? 'S' : ''} YOU` : bad ? `${bad} FAILED` : busy ? `${busy} deploying` : 'all live');
+    const order = (a: Glance['fleet'][number]) => (a.alert ? 0 : a.phase === 'FAILED' ? 1 : a.phase === 'BUILDING' || a.phase === 'PENDING' ? 2 : 3);
+    const shown = [...fleet].sort((a, b) => order(a) - order(b) || a.name.localeCompare(b.name));
     const room = MAX_LINES - lines.length;
-    for (const a of shown.slice(0, shown.length > room ? room - 1 : room)) lines.push(clip(`${mark(a.phase)} ${a.name}`));
+    for (const a of shown.slice(0, shown.length > room ? room - 1 : room)) {
+      lines.push(clip(a.alert ? `!! ${a.name} ${a.alert} ${ago(a.since ?? g.generated, now)}` : `${mark(a.phase)} ${a.name}`));
+    }
     if (shown.length > room) lines.push(`+${shown.length - (room - 1)} more`);
   } else if (view === 'plan') {
     lines.push(head('PLAN'));

@@ -624,6 +624,21 @@ function fleetStatus(cb) {
     });
   }
 }
+// What the sentinel (skills/deploy/bin/sentinel.sh) has open, by project: "down", "deploy failed",
+// "cert 9d". Read from its state files on every glance, so an alert shows within one refresh.
+function sentinelAlerts() {
+  const dir = process.env.SHIPMATE_SENTINEL_DIR || path.join(os.homedir(), '.shipmate', 'sentinel');
+  const out = {};
+  let names = []; try { names = fs.readdirSync(dir); } catch { return out; }
+  for (const n of names) {
+    if (n.startsWith('.')) continue;
+    let f = []; try { f = fs.readFileSync(path.join(dir, n), 'utf8').trim().split('|'); } catch { continue; }
+    if (f[0] !== 'open') continue;
+    const project = n.slice(0, n.lastIndexOf('.'));
+    (out[project] = out[project] || []).push({ what: f[3] || n.slice(n.lastIndexOf('.') + 1), since: new Date(Number(f[2]) * 1000).toISOString() });
+  }
+  return out;
+}
 function glanceEvents(n) {
   const file = process.env.SHIPMATE_LEDGER || path.join(os.homedir(), '.shipmate', 'ledger.jsonl');
   let lines = []; try { lines = fs.readFileSync(file, 'utf8').trim().split('\n'); } catch {}
@@ -879,8 +894,13 @@ document.getElementById('go').onclick=async()=>{try{
       if (!tok || tok.resource !== resource || !tok.scope.split(' ').includes('shipmate:read')) {
         res.writeHead(401, { 'WWW-Authenticate': `Bearer realm="shipmate"${m ? ', error="invalid_token"' : ''}` }); return res.end();
       }
-      return fleetStatus((fleet) => json(res, 200, {
-        generated: new Date().toISOString(), fleet, plan: glancePlan(), events: glanceEvents(5) }));
+      return fleetStatus((fleet) => {
+        const alerts = sentinelAlerts();
+        fleet = fleet.map((a) => (alerts[a.name] ? { ...a, alert: alerts[a.name].map((x) => x.what).join(', '), since: alerts[a.name][0].since } : a));
+        // also listed on their own: a project whose status timed out still has its alert seen
+        const list = Object.entries(alerts).flatMap(([project, xs]) => xs.map((x) => ({ project, ...x })));
+        return json(res, 200, { generated: new Date().toISOString(), fleet, alerts: list, plan: glancePlan(), events: glanceEvents(5) });
+      });
     }
 
     // -- discovery ---------------------------------------------------------------------

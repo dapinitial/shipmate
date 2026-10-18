@@ -1,7 +1,8 @@
 # shipmate on Even Realities G2
 
-Read-only shipmate status on G2 glasses: your fleet's production deploys, any armed plan, and the
-gate's recent decisions, in plain words. Built on the Even Hub SDK (a web app that runs inside the
+Read-only shipmate status on G2 glasses: your fleet's production deploys, anything the sentinel
+has open (a site down, a failed deploy, a certificate about to lapse — listed first, with how long),
+any armed plan, and the gate's recent decisions, in plain words. Built on the Even Hub SDK (a web app that runs inside the
 Even app on your phone; the glasses render it and send gestures back).
 
 | Fleet | Plan | Gate |
@@ -53,5 +54,6 @@ address the shipmate server recorded); repack when shipmate moves hosts. Sideloa
 
 `GET /glance` (bearer, `shipmate:read`) and `POST /device/pair` live in `mcp/shipmate-mcp.js`;
 CORS is open on those two and `/token` only, since they're bearer- or code-authenticated, never
-cookie-authenticated. Tests: `tests/test_mcp_auth.sh` (pairing, throttling, read-only scope,
+cookie-authenticated. The feed's `alerts` (and each fleet entry's `alert`) are what
+`skills/deploy/bin/sentinel.sh` has open. Tests: `tests/test_mcp_auth.sh` (pairing, throttling, read-only scope,
 feed shape) and `glasses/test/view.test.ts` (rendering).

@@ -25,6 +25,7 @@ SELF="$VOICE_DIR/$(basename "${BASH_SOURCE[0]}")"
 . "$VOICE_DIR/../skills/deploy/lib/ledger.sh"
 . "$VOICE_DIR/../skills/deploy/lib/provider.sh"
 . "$VOICE_DIR/../skills/deploy/lib/json.sh"
+. "$VOICE_DIR/../skills/deploy/lib/sentinel.sh"
 
 # Optional config (non-secret): export SHIPMATE_NTFY_TOPIC etc. See README.md.
 if [ -f "$HOME/.shipmate/voice.env" ]; then . "$HOME/.shipmate/voice.env"; fi
@@ -72,7 +73,7 @@ Machine interface (no phrase parsing — used by mcp/shipmate-mcp.js):
   --counsel-set <on|off>                          flip the counsel toggle
   --rollback <project|-> [--yes] | --doctor       lifecycle + health
   --flush-queue                                   replay queued dead-zone intents
-  --watchdog                                      probe fleet hosts; notify on transitions
+  --watchdog                                      sentinel + fleet hosts; push on transitions
   --verify-live <project-dir> <sha>               push one line when that commit's deploy is live
 
 The gate: execute turns consume a single-use grant minted by a plan for the same project within
@@ -87,6 +88,7 @@ Environment (put exports in ~/.shipmate/voice.env):
   SHIPMATE_VOICE_JOB_TOOLS   tool allowlist for background jobs (default: git branch/edit/commit,
                          npm/npx/node and friends — no push, no doctl/vercel/gh)
   SHIPMATE_NTFY_URL      ntfy server (default https://ntfy.sh)
+  SHIPMATE_SENTINEL      off = the watchdog stops probing projects (default on)
   SHIPMATE_VOICE_CLAUDE_ARGS   extra args appended to every claude invocation
   SHIPMATE_PLAN_GRANT    grant file shared with the MCP server (default ~/.shipmate/mcp/plan-grant.json)
   SHIPMATE_PLAN_TTL      seconds a plan stays armed (default 600)
@@ -455,8 +457,15 @@ route_to_host() { # <alias> <rest of phrase> — 0 if handled remotely, 1 to fal
   return 0
 }
 
-verb_watchdog() { # timer: probe each fleet host's onboard server; push only on transitions
-  local alias target rest host state prev sdir="$STATE_DIR/watchdog"
+verb_watchdog() { # timer: probe fleet hosts, then every live project; push only on transitions
+  local alias target rest host state prev sdir="$STATE_DIR/watchdog" line
+  # The sentinel speaks first: a site down, a failed deploy, a certificate about to lapse.
+  # It only observes; each line it prints is one push. SHIPMATE_SENTINEL=off silences it.
+  if [ "${SHIPMATE_SENTINEL:-on}" != off ]; then
+    bash "$VOICE_DIR/../skills/deploy/bin/sentinel.sh" "$SITES_ROOT" 2>/dev/null | while IFS= read -r line; do
+      [ -n "$line" ] && notify "$line"
+    done
+  fi
   [ -f "$HOSTS_FILE" ] || return 0
   mkdir -p "$sdir"
   while IFS='|' read -r alias target rest; do
@@ -625,6 +634,13 @@ latest_job() { # [running] — highest job id, optionally only running ones
 verb_status() {
   local d b st started now mins line="" project appsh p plist phase
   now="$(date +%s)"
+  # Problems first: what the sentinel has open is the thing a driver most needs to hear.
+  local key since short dtl
+  while IFS='|' read -r key since short dtl; do
+    [ -n "$key" ] && line="$line ${key%.*}: $short, for $(sentinel_ago "$((now - since))")."
+  done <<EOF
+$(sentinel_open)
+EOF
   for d in "$JOBS_DIR"/*/; do
     if [ -d "$d" ]; then
       b="$(basename "$d")"
@@ -658,7 +674,7 @@ EOF
     fi
   fi
   if [ -n "$line" ]; then speak "$(printf '%s' "$line" | clip 1200)"
-  else speak "No jobs yet. Say 'work on' something to start one."; fi
+  else speak "All quiet: nothing is down, and no jobs yet. Say 'work on' something to start one."; fi
 }
 
 # verb_rollback <project dir> <mode> — deterministic (no model in the loop): a panicked

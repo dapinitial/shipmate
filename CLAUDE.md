@@ -49,7 +49,8 @@ inject env safely), **url** (the live URL), **allowlist/auth** (wire the app's s
   `deploy-card.sh` (derived "## Deploy (shipmate)" block for a repo's CLAUDE.md + fleet drift check),
   `preflight.sh` (deterministic checks before an execute turn), `install-hooks.sh` (the pre-push guard),
   `ledger.sh` (report/annotate the decision ledger; `report --dictation` lists the phrases that
-  named no project, which is where dictation aliases come from)
+  named no project, which is where dictation aliases come from), `sentinel.sh` (shipmate speaks
+  first: site down, failed deploy, expiring cert — announced once, recovery once; observes only)
 - `skills/deploy/lib/provider.sh` — which host deploys a project (`provider:` in `.shipmate.yml`,
   else `.do/app.yaml`, else `.vercel/project.json`)
 - `skills/deploy/lib/project.sh` — per-project `.shipmate.yml` (deploy remote, branch, file cap,
@@ -57,7 +58,9 @@ inject env safely), **url** (the live URL), **allowlist/auth** (wire the app's s
   names the rule it is skipping (`SHIPMATE_ALLOW=remote|max-files|protected`), and one that
   covered nothing is not recorded, so the ledger counts bypasses rather than habits ·
   `lib/ledger.sh` — every gate decision appended to `~/.shipmate/ledger.jsonl` (facts only;
-  consequences are human notes added with `bin/ledger.sh annotate`, never inferred)
+  consequences are human notes added with `bin/ledger.sh annotate`, never inferred) ·
+  `lib/sentinel.sh` — the sentinel's confirm-then-announce state machine; its transitions go to
+  `~/.shipmate/sentinel.jsonl`, never the ledger
 - `skills/deploy/lib/envspec.sh` — the tested, security-critical env classifier
 - `tests/` — run every `tests/test_*.sh` · `voice/` — the voice bridge (bridge + tested phrase
   parser in `voice/lib/`, which resolves a project by name, then alias, then how it sounds) · `mcp/` — the MCP server over the same engine (OAuth, passkeys, TOTP,
@@ -67,7 +70,7 @@ inject env safely), **url** (the live URL), **allowlist/auth** (wire the app's s
 - `install.sh` — link skills into `~/.claude/skills` + enable the secret hook
 
 ## Before you commit
-- [ ] every `tests/test_*.sh` green (env classifier, phrase parser, gate, deploy card, guardrails, MCP auth, ledger, providers)
+- [ ] every `tests/test_*.sh` green (env classifier, phrase parser, gate, deploy card, guardrails, MCP auth, ledger, providers, sentinel)
 - [ ] `bash skills/deploy/bin/doctor.sh` sane on your machine
 - [ ] no secret value in any committed file (the pre-commit hook enforces this)
 - [ ] no hardcoded usernames/refs — derived from context

@@ -106,6 +106,24 @@ Register hosts in `~/.shipmate/hosts`, one per line: `alias|user@tailnet-name[|b
   a notification on up/down **transitions** only — if home goes dark while you're on I-70,
   your phone says so once, not every five minutes.
 
+## It speaks first (the sentinel)
+
+The same 5-minute timer runs `skills/deploy/bin/sentinel.sh` over every live project, so shipmate
+tells you before you ask:
+
+| It notices | When it says so | The push |
+|---|---|---|
+| A site down (no answer, non-2xx/3xx, or missing `expect_text`) | 2 checks in a row | 🔴 *unakin is down: … If the last deploy caused it, say 'roll back unakin, confirm'.* |
+| The newest production deploy failed | at once (a build in progress is no verdict) | ❌ *…the latest deploy failed. Production stays on the previous version…* |
+| A TLS certificate expiring within 14 days, or invalid | 2 checks in a row | 🔒 *…renewal may be stuck.* |
+
+Each problem is announced once, and so is its recovery (🟢 *back, after about 12 min*). It
+only observes: it never deploys, rolls back or retries, and a fix it suggests is a phrase for
+the usual gate. *"Status"* leads with whatever is open, the glasses' Fleet view puts it on top,
+and `doctor` lists it. Transitions are kept in `~/.shipmate/sentinel.jsonl`, apart from the
+decision ledger: the ledger counts what the gates decided, this counts what the world did.
+`SHIPMATE_SENTINEL=off` silences it; `sentinel.sh --report` shows what's open.
+
 ## Getting pinged while driving (ntfy)
 
 Job-done notifications go through [ntfy.sh](https://ntfy.sh) (free, no account):
