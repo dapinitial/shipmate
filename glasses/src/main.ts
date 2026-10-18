@@ -6,11 +6,11 @@
 // the server runs spoken questions read-only (ask, brief, recall, plan), and shipping stays a
 // deliberate act on the phone or by voice.
 import {
-  AudioInputSource, CreateStartUpPageContainer, OsEventTypeList, StartUpPageCreateResult, TextContainerProperty, TextContainerUpgrade, waitForEvenAppBridge,
+  AudioInputSource, CreateStartUpPageContainer, StartUpPageCreateResult, TextContainerProperty, TextContainerUpgrade, waitForEvenAppBridge,
   type EvenAppBridge, type EvenHubEvent,
 } from '@evenrealities/even_hub_sdk';
 import { ask, glance, pair, type Creds } from './api.ts';
-import { answerPages, nextView, render, renderTalk, type Glance, type Talk, type View } from './view.ts';
+import { answerPages, gesture, nextView, render, renderTalk, sourceName, type Glance, type Talk, type View } from './view.ts';
 
 const TEXT = { containerID: 1, containerName: 'glance' };
 const REFRESH_MS = 60_000;
@@ -20,7 +20,7 @@ let view: View = 'fleet';
 let last: Glance | null = null;
 let error = '';
 let talk: Talk | null = null;       // while talking, the display belongs to the conversation
-let listening = false, listenStart = 0, listenTick: ReturnType<typeof setInterval> | null = null;
+let listening = false, listenStart = 0, listenFrom = '', listenTick: ReturnType<typeof setInterval> | null = null;
 let frames: Uint8Array[] = [];
 const LISTEN_MAX_S = 30;
 
@@ -52,17 +52,17 @@ async function refresh() {
 }
 
 // ---- talking: hold to speak, let go to ask --------------------------------------------------
-async function startListening() {
+async function startListening(from = '') {
   if (!bridge || !creds || listening) return;
-  frames = []; listening = true; listenStart = Date.now();
-  talk = { state: 'listening', seconds: 0 }; await draw();
+  frames = []; listening = true; listenStart = Date.now(); listenFrom = from;
+  talk = { state: 'listening', seconds: 0, from }; await draw();
   if (!(await bridge.audioControl(true, AudioInputSource.Glasses))) {
     listening = false; talk = { state: 'error', message: "the glasses' microphone didn't open" }; return void draw();
   }
   listenTick = setInterval(() => {
     const s = Math.floor((Date.now() - listenStart) / 1000);
     if (s >= LISTEN_MAX_S) return void stopListening();
-    talk = { state: 'listening', seconds: s }; void draw();
+    talk = { state: 'listening', seconds: s, from: listenFrom }; void draw();
   }, 1000);
 }
 
@@ -74,7 +74,7 @@ async function stopListening() {
   const ms = Date.now() - listenStart;
   const pcm = new Uint8Array(frames.reduce((n, f) => n + f.length, 0));
   let o = 0; for (const f of frames) { pcm.set(f, o); o += f.length; }
-  console.log(`[shipmate] heard ${pcm.length} bytes in ${ms} ms over ${frames.length} frames`);
+  console.log(`[shipmate] heard ${pcm.length} bytes in ${ms} ms over ${frames.length} frames${listenFrom ? ` (held on the ${listenFrom})` : ''}`);
   frames = [];
   await askAndShow({ pcm, ms });
 }
@@ -90,33 +90,33 @@ async function askAndShow(q: { text: string } | { pcm: Uint8Array; ms: number })
   await draw();
 }
 
-function onTalkEvent(t: number | undefined): boolean { // true when the conversation took the event
+function onTalkEvent(g: ReturnType<typeof gesture>): boolean { // true when the conversation took the event
   if (!talk || talk.state === 'listening' || talk.state === 'thinking') return !!talk;
-  if (t === OsEventTypeList.SCROLL_BOTTOM_EVENT && talk.state === 'answer' && talk.page + 1 < answerPages(talk.answer)) {
+  if (g === 'next' && talk.state === 'answer' && talk.page + 1 < answerPages(talk.answer)) {
     talk = { ...talk, page: talk.page + 1 }; void draw(); return true;
   }
-  if (t === OsEventTypeList.SCROLL_TOP_EVENT && talk.state === 'answer' && talk.page > 0) {
+  if (g === 'prev' && talk.state === 'answer' && talk.page > 0) {
     talk = { ...talk, page: talk.page - 1 }; void draw(); return true;
   }
   // a tap, a double-tap, or swiping past the end goes back to the glance
-  talk = null; if (t === OsEventTypeList.DOUBLE_CLICK_EVENT) view = 'fleet';
+  talk = null; if (g === 'home') view = 'fleet';
   void refresh(); return true;
 }
 
+// The temples and the R1 ring share one gesture map (view.ts: gesture), so the ring needs no code
+// of its own; the source is only shown while listening and logged, to verify on the hardware.
 function onEvent(ev: EvenHubEvent) {
   if (ev.audioEvent) { if (listening) frames.push(new Uint8Array(ev.audioEvent.audioPcm)); return; }
-  const t = ev.textEvent?.eventType ?? ev.sysEvent?.eventType;
   if (!ev.textEvent && !ev.sysEvent) return;
-  if (t === OsEventTypeList.LONG_PRESS_EVENT) return void startListening();
-  if (t === OsEventTypeList.LONG_PRESS_RELEASE_EVENT) return void stopListening();
-  if (onTalkEvent(t)) return;
-  switch (t) {
-    case OsEventTypeList.SCROLL_BOTTOM_EVENT: view = nextView(view, 1); return void draw();
-    case OsEventTypeList.SCROLL_TOP_EVENT: view = nextView(view, -1); return void draw();
-    case OsEventTypeList.DOUBLE_CLICK_EVENT: view = 'fleet'; return void refresh();
-    case OsEventTypeList.CLICK_EVENT:
-    case undefined: return void refresh(); // a tap is event 0, which payloads often omit
-    case OsEventTypeList.FOREGROUND_ENTER_EVENT: return void refresh();
+  const g = gesture(ev.textEvent?.eventType ?? ev.sysEvent?.eventType);
+  if (g === 'listen') return void startListening(sourceName(ev.sysEvent?.eventSource));
+  if (g === 'send') return void stopListening();
+  if (onTalkEvent(g)) return;
+  switch (g) {
+    case 'next': view = nextView(view, 1); return void draw();
+    case 'prev': view = nextView(view, -1); return void draw();
+    case 'home': view = 'fleet'; return void refresh();
+    case 'refresh': return void refresh();
   }
 }
 

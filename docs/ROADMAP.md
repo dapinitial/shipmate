@@ -75,8 +75,10 @@ changes production still goes through the same plan → grant → execute gate.
      (channel `rollback-button`, ledger `rollback executed`), then re-run the sentinel so the
      🟢 recovery push follows; on Vercel, say that new pushes are held until roll-forward;
    - only for "site down", never for a failed deploy (the old version is still serving) or a cert.
-4. **G2 hardware.** Sideload; confirm long-press (touchpad and ring) starts listening, the audio
-   rate (`[shipmate] heard N bytes in M ms`), and the layout on the real display.
+4. **G2 + R1 hardware.** Sideload; confirm a long-press on each temple and on the R1 ring starts
+   listening (the listening screen and the console name the source: `held on the ring`), that the
+   ring's swipe pages and changes views, the audio rate (`[shipmate] heard N bytes in M ms`), and
+   the layout on the real display.
 
 **Paused:** YC (installer for strangers, outside users). Revisit after 1–3.
 

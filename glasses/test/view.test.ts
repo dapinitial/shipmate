@@ -2,7 +2,8 @@
 // contract, so every line it can emit is checked against the G2's limits.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { LINE_CHARS, MAX_LINES, ago, answerPages, nextView, render, renderTalk, says, wrap, type Glance } from '../src/view.ts';
+import { LINE_CHARS, MAX_LINES, ago, answerPages, gesture, nextView, render, renderTalk, says, sourceName, wrap, type Glance } from '../src/view.ts';
+import { EventSourceType, OsEventTypeList } from '@evenrealities/even_hub_sdk';
 
 const now = new Date('2026-10-14T12:00:00Z');
 const g = (over: Partial<Glance> = {}): Glance => ({
@@ -141,4 +142,19 @@ test('talking: listening, thinking, errors, and paged answers all fit', () => {
   assert.match(last, new RegExp(`ANSWER ${pages}/${pages}`));
   fits(last);
   assert.match(renderTalk({ state: 'answer', heard: 'status', answer: 'All quiet.', page: 0 }), /^SHIPMATE · ANSWER\n> status\nAll quiet\.$/);
+});
+
+test('gestures: the SDK\'s event numbers, the same from temples and the R1 ring', () => {
+  assert.equal(gesture(OsEventTypeList.LONG_PRESS_EVENT), 'listen');
+  assert.equal(gesture(OsEventTypeList.LONG_PRESS_RELEASE_EVENT), 'send');
+  assert.equal(gesture(OsEventTypeList.SCROLL_BOTTOM_EVENT), 'next');
+  assert.equal(gesture(OsEventTypeList.SCROLL_TOP_EVENT), 'prev');
+  assert.equal(gesture(OsEventTypeList.DOUBLE_CLICK_EVENT), 'home');
+  assert.equal(gesture(OsEventTypeList.CLICK_EVENT), 'refresh');
+  assert.equal(gesture(undefined), 'refresh'); // a tap is event 0, often omitted
+  assert.equal(gesture(OsEventTypeList.FOREGROUND_ENTER_EVENT), 'refresh');
+  assert.equal(sourceName(EventSourceType.TOUCH_EVENT_FROM_RING), 'ring');
+  assert.equal(sourceName(EventSourceType.TOUCH_EVENT_FROM_GLASSES_L), 'left temple');
+  assert.equal(sourceName(undefined), '');
+  assert.match(renderTalk({ state: 'listening', seconds: 2, from: 'ring' }), /● 2s · ring/);
 });

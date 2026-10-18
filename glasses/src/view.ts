@@ -117,18 +117,35 @@ export function wrap(text: string, width = LINE_CHARS): string[] {
 
 // Talking: what the glasses show while listening, thinking, and answering. An answer longer than
 // one screen is paged (swipe); the header says which page.
-export type Talk = { state: 'listening'; seconds: number } | { state: 'thinking'; heard?: string }
+export type Talk = { state: 'listening'; seconds: number; from?: string } | { state: 'thinking'; heard?: string }
   | { state: 'answer'; heard: string; answer: string; page: number } | { state: 'error'; message: string };
 export const ANSWER_LINES = MAX_LINES - 2; // header + what it heard
 export function answerPages(answer: string): number { return Math.max(1, Math.ceil(wrap(answer).length / ANSWER_LINES)); }
 export function renderTalk(t: Talk): string {
   const head = (s: string) => `SHIPMATE · ${s}`;
-  if (t.state === 'listening') return [head('LISTENING'), '', `● ${t.seconds}s`, '', 'speak, then let go'].join('\n');
+  if (t.state === 'listening') return [head('LISTENING'), '', `● ${t.seconds}s${t.from ? ` · ${t.from}` : ''}`, '', 'speak, then let go'].join('\n');
   if (t.state === 'thinking') return [head('THINKING'), ...(t.heard ? ['', clip(`"${t.heard}"`)] : [])].join('\n');
   if (t.state === 'error') return [head('DIDN\'T GET THAT'), '', ...wrap(t.message).slice(0, MAX_LINES - 4), '', 'hold to try again'].join('\n');
   const pages = answerPages(t.answer), page = Math.min(Math.max(0, t.page), pages - 1);
   const body = wrap(t.answer).slice(page * ANSWER_LINES, (page + 1) * ANSWER_LINES);
   return [head(pages > 1 ? `ANSWER ${page + 1}/${pages}` : 'ANSWER'), clip(`> ${t.heard}`), ...body].join('\n');
 }
+
+// Input: the G2's temple touchpads and the R1 ring send the same gestures, tagged with where they
+// came from (EventSourceType: 1 right temple, 2 ring, 3 left temple). Every source does the same
+// thing — the ring is simply the discreet way to hold-to-talk with a hand on the wheel.
+export type Gesture = 'listen' | 'send' | 'next' | 'prev' | 'home' | 'refresh' | 'none';
+export function gesture(eventType: number | undefined): Gesture {
+  switch (eventType) {
+    case 9: return 'listen';   // LONG_PRESS_EVENT
+    case 10: return 'send';    // LONG_PRESS_RELEASE_EVENT
+    case 2: return 'next';     // SCROLL_BOTTOM_EVENT
+    case 1: return 'prev';     // SCROLL_TOP_EVENT
+    case 3: return 'home';     // DOUBLE_CLICK_EVENT
+    case 0: case undefined: case 4: return 'refresh'; // CLICK (often omitted) · FOREGROUND_ENTER
+    default: return 'none';
+  }
+}
+export const sourceName = (s: number | undefined) => ({ 1: 'right temple', 2: 'ring', 3: 'left temple' } as Record<number, string>)[s ?? 0] ?? '';
 
 export const nextView = (v: View, step: 1 | -1): View => VIEWS[(VIEWS.indexOf(v) + step + VIEWS.length) % VIEWS.length];

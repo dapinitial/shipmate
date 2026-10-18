@@ -11,7 +11,7 @@ Even app on your phone; the glasses render it and send gestures back).
 
 *Captured from the official Even Hub simulator against the live shipmate server.*
 
-**Gestures:** press and hold to ask (see Talk) · swipe up/down moves between Fleet, Brief (the morning briefing as short lines), Plan and Gate · tap refreshes · double-tap
+**Gestures** (the temples and the R1 ring are the same; the SDK tags each event with its source, and the ring needs no code of its own): press and hold to ask (see Talk) · swipe up/down moves between Fleet, Brief (the morning briefing as short lines), Plan and Gate · tap refreshes · double-tap
 jumps to the fleet. It refreshes itself every minute.
 
 **It can't ship.** The glasses pair with a read-only token (`shipmate:read`). There is no
@@ -21,7 +21,7 @@ shows `hst` instead of a fresh age, because its timestamp is when it was written
 
 ## Talk
 
-**Press and hold** the touchpad, speak, **let go**. The glasses' microphones record while you
+**Press and hold** the touchpad — or the **R1 ring** — speak, **let go**. The glasses' microphones record while you
 hold (up to 30 s); the question goes to your shipmate host, becomes words there with
 [whisper.cpp](https://github.com/ggml-org/whisper.cpp) (on-device; the audio is deleted as soon as
 it's transcribed and never leaves the host), and the answer comes back on the display. Swipe to
