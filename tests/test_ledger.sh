@@ -69,7 +69,15 @@ echo s > "$R/.env"; G "$R" add -f .env; G "$R" commit -q -m env; G "$R" push -q 
 has "protected recorded" "$(tail -1 "$SHIPMATE_LEDGER")" '"detail":"touches .env"'
 SHIPMATE_ALLOW=1 G "$R" push -q mirror main >/dev/null 2>&1
 has "override recorded"  "$(tail -1 "$SHIPMATE_LEDGER")" '"outcome":"overridden"'
-ok  "three new lines"    "$(( $(wc -l < "$SHIPMATE_LEDGER") - before ))" 3
+# A blanket override records one line PER rule it actually covered, not one generic line: this
+# push waves through both the wrong remote and the protected .env, and the record now says so.
+has "override names the remote rule"    "$(tail -2 "$SHIPMATE_LEDGER")" '"detail":"SHIPMATE_ALLOW=remote"'
+has "override names the protected rule" "$(tail -1 "$SHIPMATE_LEDGER")" '"detail":"SHIPMATE_ALLOW=protected"'
+ok  "four new lines"     "$(( $(wc -l < "$SHIPMATE_LEDGER") - before ))" 4
+# And the dictation report reads phrase-parser misses back out of the same record.
+bash "$BIN/ledger.sh" record phrase-parser unresolved - "deploy anakin" "no project matched by name or sound" >/dev/null
+has "dictation report"   "$(bash "$BIN/ledger.sh" report --dictation)" "deploy anakin"
+has "dictation counts"   "$(bash "$BIN/ledger.sh" report --dictation)" "1 distinct"
 
 echo
 if [ "$fail" -eq 0 ]; then echo "✓ all $pass assertions passed"; exit 0

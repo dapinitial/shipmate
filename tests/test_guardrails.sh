@@ -70,7 +70,22 @@ echo "  wrong remote refused:"
 echo b > "$R/b.txt"; G "$R" add -A; G "$R" commit -q -m b
 out="$(G "$R" push mirror main 2>&1)"; ok "mirror refused" "$?" 1
 has "mirror reason"    "$out" "deploys from 'origin'; refusing to push to 'mirror'"
-ok "bypass env allows" "$(SHIPMATE_ALLOW=1 G "$R" push -q mirror main >/dev/null 2>&1; echo $?)" 0
+has "names the rule to allow" "$out" "SHIPMATE_ALLOW=remote git push"
+ok "the named rule allows" "$(SHIPMATE_ALLOW=remote G "$R" push -q mirror main >/dev/null 2>&1; echo $?)" 0
+ok "a different rule does not" "$(SHIPMATE_ALLOW=max-files G "$R" push -q mirror main >/dev/null 2>&1; echo $?)" 1
+ok "a list of rules allows" "$(SHIPMATE_ALLOW=protected,remote G "$R" push -q mirror main >/dev/null 2>&1; echo $?)" 0
+ok "legacy =1 still allows" "$(SHIPMATE_ALLOW=1 G "$R" push -q mirror main >/dev/null 2>&1; echo $?)" 0
+out="$(SHIPMATE_ALLOW=1 G "$R" push mirror main 2>&1)"
+has "=1 names what it covered" "$out" "waved through: remote"
+has "=1 asks for the narrow form" "$out" "SHIPMATE_ALLOW=remote git push"
+# The measurement fix: a blanket override on a push that broke no rule is a habit, not a bypass,
+# and recording it as one is how 25 of 30 ledger entries became noise.
+: > "$SHIPMATE_LEDGER"
+SHIPMATE_ALLOW=1 G "$R" push -q origin main >/dev/null 2>&1
+ok "unneeded override records nothing" "$(grep -c 'pre-push:override' "$SHIPMATE_LEDGER")" 0
+: > "$SHIPMATE_LEDGER"
+SHIPMATE_ALLOW=remote G "$R" push -q mirror main >/dev/null 2>&1
+ok "a real override names its rule" "$(grep -c 'SHIPMATE_ALLOW=remote' "$SHIPMATE_LEDGER")" 1
 G "$R" push -q origin main >/dev/null 2>&1
 echo "  protected path refused:"
 echo secret > "$R/.env"; G "$R" add -f .env; G "$R" commit -q -m env

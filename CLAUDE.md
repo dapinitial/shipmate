@@ -48,16 +48,19 @@ inject env safely), **url** (the live URL), **allowlist/auth** (wire the app's s
   `supabase-allowlist.sh`, `request-approval.sh` (tap-to-confirm for new spend),
   `deploy-card.sh` (derived "## Deploy (shipmate)" block for a repo's CLAUDE.md + fleet drift check),
   `preflight.sh` (deterministic checks before an execute turn), `install-hooks.sh` (the pre-push guard),
-  `ledger.sh` (report/annotate the decision ledger)
+  `ledger.sh` (report/annotate the decision ledger; `report --dictation` lists the phrases that
+  named no project, which is where dictation aliases come from)
 - `skills/deploy/lib/provider.sh` — which host deploys a project (`provider:` in `.shipmate.yml`,
   else `.do/app.yaml`, else `.vercel/project.json`)
 - `skills/deploy/lib/project.sh` — per-project `.shipmate.yml` (deploy remote, branch, file cap,
-  protected paths, health URL) · `lib/pre-push.hook` — the guard installed per clone ·
+  protected paths, health URL) · `lib/pre-push.hook` — the guard installed per clone; an override
+  names the rule it is skipping (`SHIPMATE_ALLOW=remote|max-files|protected`), and one that
+  covered nothing is not recorded, so the ledger counts bypasses rather than habits ·
   `lib/ledger.sh` — every gate decision appended to `~/.shipmate/ledger.jsonl` (facts only;
   consequences are human notes added with `bin/ledger.sh annotate`, never inferred)
 - `skills/deploy/lib/envspec.sh` — the tested, security-critical env classifier
 - `tests/` — run every `tests/test_*.sh` · `voice/` — the voice bridge (bridge + tested phrase
-  parser in `voice/lib/`) · `mcp/` — the MCP server over the same engine (OAuth, passkeys, TOTP,
+  parser in `voice/lib/`, which resolves a project by name, then alias, then how it sounds) · `mcp/` — the MCP server over the same engine (OAuth, passkeys, TOTP,
   the read-only glance + device pairing) · `glasses/` — read-only Even G2 app (its own npm
   project; `npm test` there) · `docs/` —
   vision/secrets/roadmap

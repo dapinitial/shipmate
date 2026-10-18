@@ -3,24 +3,39 @@
 # Refuses a push that (1) targets any remote but the project's deploy remote, (2) touches a
 # protected path, or (3) changes more files than the project's cap. Reads <repo>/.shipmate.yml;
 # sane defaults without it. Structural: it does not matter who or what runs `git push`.
-# Bypass, deliberately and visibly:  SHIPMATE_ALLOW=1 git push …   (never --no-verify by an agent)
+# Bypass one named rule, deliberately and visibly, never --no-verify by an agent:
+#   SHIPMATE_ALLOW=remote|max-files|protected git push …     (comma-separate for more than one)
+# `all` (and the legacy `1`) still waves everything through, but a blanket override is a habit
+# rather than a decision, so the hook names the rule it actually needed and asks for that instead.
+# An override that covered nothing is not recorded: a bypass you did not need is not a bypass,
+# and counting it as one is exactly how a ledger starts lying to you.
 set -uo pipefail
 remote="$1"; url="${2:-}"
 LIB="__SHIPMATE_LIB__"
 [ -f "$LIB/ledger.sh" ] && . "$LIB/ledger.sh" || ledger_record() { :; }
-if [ "${SHIPMATE_ALLOW:-}" = 1 ]; then   # a deliberate human override is allowed — and on the record
-  ledger_record pre-push:override overridden "$(basename "$(git rev-parse --show-toplevel)")" "git push $remote" "SHIPMATE_ALLOW=1" >/dev/null
-  exit 0
-fi
+
+ALLOW="$(printf '%s' "${SHIPMATE_ALLOW:-}" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')"
+[ "$ALLOW" = 1 ] && ALLOW=all          # the old blanket spelling still works
+blanket=0; case "$ALLOW" in all) blanket=1 ;; esac
+covered=''                             # rules a blanket override actually had to cover
+allowed() {                            # <rule> — may this push skip that rule?
+  [ "$blanket" = 1 ] && { covered="${covered:+$covered,}$1"; return 0; }
+  case ",$ALLOW," in *",$1,"*) return 0 ;; esac
+  return 1
+}
+waived() { ledger_record pre-push:override overridden "$2" "git push $remote" "SHIPMATE_ALLOW=$1" >/dev/null; }
+
 if [ -f "$LIB/project.sh" ]; then . "$LIB/project.sh"; else
   echo "shipmate pre-push: library missing at $LIB — reinstall with install-hooks.sh (allowing push)"; exit 0; fi
-root="$(git rev-parse --show-toplevel)"
+root="$(git rev-parse --show-toplevel)"; proj="$(basename "$root")"
 want="$(project_deploy_remote "$root")"
 if [ "$remote" != "$want" ] && [ "$url" != "$(git remote get-url "$want" 2>/dev/null)" ]; then
-  ledger_record pre-push:remote refused "$(basename "$(git rev-parse --show-toplevel)")" "git push $remote" "deploy remote is $want" >/dev/null
-  echo "✗ shipmate: this project deploys from '$want'; refusing to push to '$remote' ($url)."
-  echo "  If you really mean it: SHIPMATE_ALLOW=1 git push $remote …"
-  exit 1
+  if allowed remote; then waived remote "$proj"; else
+    ledger_record pre-push:remote refused "$proj" "git push $remote" "deploy remote is $want" >/dev/null
+    echo "✗ shipmate: this project deploys from '$want'; refusing to push to '$remote' ($url)."
+    echo "  If you really mean it: SHIPMATE_ALLOW=remote git push $remote …"
+    exit 1
+  fi
 fi
 cap="$(project_max_files "$root")"; bad=0; z="0000000000000000000000000000000000000000"
 while read -r lref lsha rref rsha; do
@@ -30,18 +45,29 @@ while read -r lref lsha rref rsha; do
   files="$(git diff --name-only "$base" "$lsha" 2>/dev/null)"
   n="$(printf '%s\n' "$files" | awk 'NF' | wc -l | tr -d ' ')"
   if [ "$n" -gt "$cap" ]; then
-    ledger_record pre-push:max-files refused "$(basename "$root")" "git push ${rref#refs/heads/}" "$n files changed; cap $cap" >/dev/null
-    echo "✗ shipmate: pushing ${rref#refs/heads/} would change $n files; this project's cap is $cap (.shipmate.yml max_files)."
-    echo "  Split the change, or push deliberately: SHIPMATE_ALLOW=1 git push …"; bad=1
+    if allowed max-files; then waived max-files "$proj"; else
+      ledger_record pre-push:max-files refused "$proj" "git push ${rref#refs/heads/}" "$n files changed; cap $cap" >/dev/null
+      echo "✗ shipmate: pushing ${rref#refs/heads/} would change $n files; this project's cap is $cap (.shipmate.yml max_files)."
+      echo "  Split the change, or push deliberately: SHIPMATE_ALLOW=max-files git push …"; bad=1
+    fi
   fi
   while IFS= read -r f; do
     [ -n "$f" ] || continue
     if project_is_protected "$root" "$f"; then
-      ledger_record pre-push:protected refused "$(basename "$root")" "git push ${rref#refs/heads/}" "touches $f" >/dev/null
-      echo "✗ shipmate: '$f' is a protected path (.shipmate.yml protected / secrets default); refusing to push it."; bad=1
+      if allowed protected; then waived protected "$proj"; else
+        ledger_record pre-push:protected refused "$proj" "git push ${rref#refs/heads/}" "touches $f" >/dev/null
+        echo "✗ shipmate: '$f' is a protected path (.shipmate.yml protected / secrets default); refusing to push it."
+        echo "  If that file really belongs upstream: SHIPMATE_ALLOW=protected git push …"; bad=1
+      fi
     fi
   done <<EOF
 $files
 EOF
 done
+# A blanket override that covered nothing stays silent and unrecorded. One that did cover
+# something says which rule it was, so next time the override can name it instead.
+if [ "$blanket" = 1 ] && [ -n "$covered" ]; then
+  echo "⚠ shipmate: SHIPMATE_ALLOW=$ALLOW waved through: $covered."
+  echo "  Next time, name it — SHIPMATE_ALLOW=$covered git push … — so the record means something."
+fi
 exit $bad
