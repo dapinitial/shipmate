@@ -120,4 +120,7 @@ for d in "$ROOT"/*/ "$ROOT"/*/*/; do
     esac
   fi
 done
+# The heartbeat: a check's own file only changes when its verdict does, so "when did the sentinel
+# last look" lives here (the briefing reads it before calling a night quiet).
+: > "$SENTINEL_DIR/.last-run"
 exit 0

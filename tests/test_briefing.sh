@@ -22,15 +22,17 @@ hasnt() { if printf '%s' "$2" | grep -q -F -- "$3"; then echo "  ✗ $1: should 
 # "now" is Saturday 2026-10-17 07:30 PDT; the last briefing was Friday 07:30 PDT
 NOW=1792247400; export SHIPMATE_NOW=$NOW
 iso() { python3 -c 'import sys,datetime as d; print(d.datetime.fromtimestamp(int(sys.argv[1]), d.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"))' "$1"; }
-fresh() { for f in "$TMP"/sentinel/*; do touch "$f"; done; }   # the sentinel just ran
+fresh() { touch "$TMP/sentinel/.last-run"; }   # the sentinel just finished a pass
 B() { bash "$BIN/briefing.sh" "$@" 2>&1; }
 
 echo "quiet:"
+has "never ran: said so" "$(B)" "The sentinel hasn't checked the fleet yet"
 for p in unakin panogram rillet; do printf 'ok|0|%s||\n' "$NOW" > "$TMP/sentinel/$p.site"; done; fresh
 out="$(B)"
 ok "no marker: the last 24 hours, said plainly" "$out" "Since yesterday at 7:30 AM: Quiet: nothing shipped, nothing broke. All 3 projects are answering."
-touch -t 202610170500 "$TMP"/sentinel/*
+touch -t 202610170500 "$TMP/sentinel/.last-run"; touch "$TMP"/sentinel/*.site
 has "a stale sentinel is admitted, not called quiet" "$(B)" "The sentinel hasn't checked the fleet in 2 hours, so the live picture may be out of date."
+has "…judged by its heartbeat, not by when a verdict last changed" "$(B)" "in 2 hours"
 hasnt "…and it doesn't claim all are answering" "$(B)" "projects are answering"
 fresh
 

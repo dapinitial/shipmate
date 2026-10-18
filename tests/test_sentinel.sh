@@ -83,6 +83,7 @@ export SHIPMATE_APP_SH="$TMP/app.sh" SHIPMATE_SENTINEL_CHECKS="site deploy"
 S() { bash "$BIN/sentinel.sh" "$ROOT" 2>&1; }
 
 ok "healthy: says nothing"     "$(S)" ""
+ok "a full pass leaves a heartbeat" "$([ -f "$TMP/state/.last-run" ] && echo yes)" yes
 ok "only status was asked, only for the deployable repo" "$(sort -u "$TMP/app.calls" | sed "s#$ROOT/##")" "status demo"
 site 503 'oops'
 ok "first 503: still silent"   "$(S)" ""

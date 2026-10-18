@@ -180,8 +180,9 @@ for j, proj, st in jobs:
     happened.append(f'Job {j} on {proj} finished: {st}.'); lines_then.append(f'job {j} {proj} {st}')
 
 # -- is the picture current? ------------------------------------------------------------------
-try: fresh = max(os.path.getmtime(os.path.join(SDIR, n)) for n in names if not n.startswith('.'))
-except ValueError: fresh = 0
+# the sentinel stamps .last-run after every full pass (a check's file only changes with its verdict)
+try: fresh = os.path.getmtime(os.path.join(SDIR, '.last-run'))
+except OSError: fresh = 0
 projects = sorted({n.rsplit('.', 1)[0] for n in names if not n.startswith('.') and '.' in n})
 stale = not fresh or now - fresh > 1800
 
