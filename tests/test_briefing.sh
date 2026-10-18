@@ -11,7 +11,7 @@ TMP="$(mktemp -d 2>/dev/null || mktemp -d -t shipmate)"; trap 'rm -rf "$TMP"' EX
 export TZ=America/Los_Angeles HOME="$TMP/home"
 export SHIPMATE_LEDGER="$TMP/ledger.jsonl" SHIPMATE_SENTINEL_DIR="$TMP/sentinel" SHIPMATE_SENTINEL_LOG="$TMP/sentinel.jsonl" \
   SHIPMATE_VOICE_STATE="$TMP/voice" SHIPMATE_APPROVALS_DIR="$TMP/approvals" SHIPMATE_PLAN_GRANT="$TMP/plan-grant.json" \
-  SHIPMATE_BRIEFING_MARK="$TMP/briefing.last"
+  SHIPMATE_BRIEFING_MARK="$TMP/briefing.last" SHIPMATE_MEMORY="$TMP/memory.jsonl"
 mkdir -p "$TMP/home" "$TMP/sentinel"
 
 pass=0; fail=0
@@ -68,7 +68,14 @@ printf 'open|2|%s|down|https://unakin 503\n' "$((NOW-7200))" > "$TMP/sentinel/un
 mkdir -p "$TMP/approvals"; printf 'pending\nCreate panogram-api ($5/mo)\n' > "$TMP/approvals/n1"; printf 'approved\nold\n' > "$TMP/approvals/n2"
 python3 -c 'import json,sys; json.dump({"project":"rillet","ts":(int(sys.argv[1])-120)*1000}, open(sys.argv[2],"w"))' "$NOW" "$SHIPMATE_PLAN_GRANT"
 mkdir -p "$TMP/voice/queue/q1" "$TMP/voice/queue/q2"
+M() { printf '{"op":"%s","id":"%s","ref":"%s","t":%s,"kind":"%s","text":"%s"}\n' "$@" >> "$SHIPMATE_MEMORY"; }
+M add r1 '' $((NOW-90000)) reminder 'check panogram logs'; M add r2 '' $((NOW-80000)) reminder 'renew the domain'
+M add f1 '' $((NOW-70000)) fact 'the freeze is on fridays'; M done '' r2 $((NOW-1000)) '' ''
 out="$(B)"
+has "open reminders are in what needs you" "$out" "You asked me to remind you to check panogram logs."
+hasnt "a checked-off reminder is not"       "$out" "renew the domain"
+hasnt "facts are not reminders"             "$out" "freeze"
+has "reminder line for the glasses"         "$(B --lines)" "remind: check panogram logs"
 has "needs you comes first"      "$out" "Since yesterday at 7:30 AM: Needs you: unakin is down, for 2 hours."
 has "a pending approval, not an answered one" "$out" "1 spend approval waiting for your tap: Create panogram-api (\$5/mo)."
 has "the armed plan"             "$out" "A plan for rillet is armed, 8 minutes left to say ship it."

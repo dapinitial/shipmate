@@ -83,6 +83,9 @@ authenticator for passkeys and RFC 6238 codes for the app (118 assertions).
 | `shipmate_task_stop` | stop a running job | — |
 | `shipmate_doctor` | one-sentence health check (net, tailnet, servers, auth, disk, jobs, queue) | read-only, deterministic |
 | `shipmate_briefing` | what needs you now + what happened since the last morning briefing | read-only, deterministic |
+| `shipmate_recall` | what shipmate remembers + where the conversation left off, across channels | read-only, deterministic |
+| `shipmate_remember` | keep a fact or a reminder; "by X I mean <project>" teaches a name | needs `shipmate:execute`; never a permission |
+| `shipmate_forget` | forget an item, or `done:true` to check off a reminder (ambiguous → lists, removes nothing) | needs `shipmate:execute` |
 | `shipmate_log` | timestamped captains-log entry, committed verbatim | deterministic; pushes only with `publish:true` |
 | `shipmate_rollback` | revert to the previous successful deployment (DO) | describe-only unless `confirm:true`; deterministic |
 | `shipmate_counsel` | deliberate on a question (single model, or multi-model panel + dissent when the toggle is on) | read-only always |

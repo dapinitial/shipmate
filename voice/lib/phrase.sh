@@ -30,6 +30,10 @@ phrase_strip_confirm() {
 
 # phrase_verb <normalized-no-confirm> — one of:
 #   brief   — "good morning", "briefing", "brief me", "what did I miss", "catch me up"
+#   remember / remind / forget / done — memory: "remember (that) …", "remind me to …",
+#             "forget (about) …", "done with …" / "check off …" (not "forget it": that's a sentence)
+#   recall  — "what do you remember", "what have I told you", "my reminders"
+#   recap   — "where did we leave off", "where were we", "what was I doing"
 #   status  — "status", "any update", "how's it going", "progress"
 #   result  — "result …", "read job …", "what happened …"
 #   stop    — "stop/cancel/kill …"
@@ -43,6 +47,15 @@ phrase_verb() {
   case "$p" in
     good\ morning*|morning\ briefing*|morning\ brief|briefing|briefing\ *|brief\ me*|the\ briefing*|daily\ briefing*|what\ did\ i\ miss*|catch\ me\ up*|what\ happened\ overnight*|what\ happened\ while\ i*)
       echo brief; return ;;
+    remember\ *) echo remember; return ;;
+    remind\ me\ *) echo remind; return ;;
+    forget\ it|forget\ it\ *|forget\ you\ *) ;;
+    forget\ *) echo forget; return ;;
+    done\ with\ *|check\ off\ *|cross\ off\ *|mark\ *\ done|mark\ *\ as\ done) echo done; return ;;
+    what\ do\ you\ remember*|what\ have\ i\ told\ you*|what\ did\ i\ tell\ you\ to\ remember*|my\ reminders*|what\ are\ my\ reminders*|any\ reminders*)
+      echo recall; return ;;
+    where\ did\ we\ leave\ off*|where\ were\ we*|what\ was\ i\ doing*|what\ were\ we\ doing*|what\ were\ we\ working\ on*|pick\ up\ where*)
+      echo recap; return ;;
     status|status\ *|any\ update*|how\ is\ it\ going*|how\'s\ it\ going*|progress|progress\ *)
       echo status; return ;;
     result|result\ *|results|results\ *|read\ job*|what\ happened*)
@@ -69,6 +82,25 @@ phrase_verb() {
       echo job; return ;;
   esac
   echo say
+}
+
+# phrase_memory_body <normalized> — what to remember / remind / forget / finish, minus the
+# trigger: "remember that the freeze is on fridays" → "the freeze is on fridays",
+# "remind me to check panogram" → "check panogram", "mark the dns thing as done" → "the dns thing".
+phrase_memory_body() {
+  printf '%s' "${1:-}" | sed -E \
+    -e 's/^remember (that |this |to )?//' -e 's/^remind me (to |that |about )?//' \
+    -e 's/^forget (about |that )?//' -e 's/^(done with|check off|cross off) (the )?//' \
+    -e 's/^mark (.*) (as )?done$/\1/' -e 's/ as$//'
+}
+
+# phrase_memory_alias <memory body> — "name|target" when the body teaches a name:
+# "the site means unakin", "by the site i mean unakin", "when i say the site i mean unakin".
+# The caller checks that the target is a real project before learning it.
+phrase_memory_alias() {
+  printf '%s' "${1:-}" | sed -nE \
+    -e 's/^(when i say|by) (.+) i mean (.+)$/\2|\3/p' \
+    -e 's/^(.+) means (.+)$/\1|\2/p' | head -1 | sed -E "s/'//g; s/\|the /|/"
 }
 
 # phrase_counsel_question <normalized> — the question minus its counsel trigger words:

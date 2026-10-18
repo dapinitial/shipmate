@@ -10,7 +10,7 @@
 #
 # Window: since the last --mark (~/.shipmate/briefing.last), else the last 24 hours; never more
 # than 7 days. Sources, each optional: the sentinel (open problems + ~/.shipmate/sentinel.jsonl),
-# the decision ledger, background jobs, pending spend approvals, the armed plan, the dead-zone
+# the decision ledger, your open reminders (~/.shipmate/memory.jsonl), background jobs, pending spend approvals, the armed plan, the dead-zone
 # queue. If the sentinel hasn't run lately, the briefing says so instead of calling things quiet.
 set -uo pipefail
 case "${1:-}" in -h|--help) sed -n '2,16p' "$0"; exit 0;; esac
@@ -33,6 +33,7 @@ SLOG = env('SHIPMATE_SENTINEL_LOG', f'{H}/sentinel.jsonl')
 VOICE = env('SHIPMATE_VOICE_STATE', f'{H}/voice')
 APPROVALS = env('SHIPMATE_APPROVALS_DIR', f'{H}/approvals')
 GRANT = env('SHIPMATE_PLAN_GRANT', f'{H}/mcp/plan-grant.json')
+MEMORY = env('SHIPMATE_MEMORY', f'{H}/memory.jsonl')
 PLAN_TTL = int(env('SHIPMATE_PLAN_TTL', '600'))
 now = float(env('SHIPMATE_NOW', str(time.time())))
 
@@ -109,6 +110,16 @@ except Exception: queued = 0
 if queued:
     needs.append(f'{plural(queued, "request")} queued from a dead zone, waiting to replay.')
     lines_now.append(f'{queued} queued')
+
+live = {}
+for r in jsonl(MEMORY):
+    if r.get('op') == 'add' and r.get('kind') == 'reminder': live[r.get('id')] = r
+    elif r.get('op') in ('forget', 'done'): live.pop(r.get('ref'), None)
+rem = sorted(live.values(), key=lambda r: r.get('t', 0))
+if rem:
+    shown = [str(r.get('text', '')) for r in rem[:3]]
+    needs.append('You asked me to remind you to ' + andjoin(shown) + (f', and {len(rem) - 3} more' if len(rem) > 3 else '') + '.')
+    lines_now += [f'remind: {t}'[:44] for t in shown] + ([f'+{len(rem) - 3} more reminders'] if len(rem) > 3 else [])
 
 # -- what happened in the window ------------------------------------------------------------
 outages = {}

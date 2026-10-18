@@ -26,6 +26,7 @@ SELF="$VOICE_DIR/$(basename "${BASH_SOURCE[0]}")"
 . "$VOICE_DIR/../skills/deploy/lib/provider.sh"
 . "$VOICE_DIR/../skills/deploy/lib/json.sh"
 . "$VOICE_DIR/../skills/deploy/lib/sentinel.sh"
+. "$VOICE_DIR/../skills/deploy/lib/memory.sh"
 
 # Optional config (non-secret): export SHIPMATE_NTFY_TOPIC etc. See README.md.
 if [ -f "$HOME/.shipmate/voice.env" ]; then . "$HOME/.shipmate/voice.env"; fi
@@ -75,6 +76,7 @@ Machine interface (no phrase parsing — used by mcp/shipmate-mcp.js):
   --flush-queue                                   replay queued dead-zone intents
   --watchdog                                      sentinel + fleet hosts; push on transitions
   --briefing [--push]                             say (or push, and start the next window) the briefing
+  --remember <fact|reminder> <text> | --forget <text> | --done <text> | --recall    memory
   --verify-live <project-dir> <sha>               push one line when that commit's deploy is live
 
 The gate: execute turns consume a single-use grant minted by a plan for the same project within
@@ -213,6 +215,11 @@ turn() { # <phrase> <mode:plan|execute> <project dir>
     perm="plan"
     prompt="Spoken request (hands-free driver; reply short enough to read aloud, plain prose, no markdown): \"$phrase\". Mode=PLAN: say what you would do and the exact monthly cost. Create, change, charge, or publish NOTHING."
   fi
+  # What it remembers rides along as notes (never permissions); a fresh session also hears the
+  # last few exchanges from any channel, so a switch from Siri to the Claude app keeps the thread.
+  local memctx
+  if [ -z "$sid" ]; then memctx="$(memory_context recent 2>/dev/null)"; else memctx="$(memory_context 2>/dev/null)"; fi
+  [ -n "$memctx" ] && prompt="$memctx $prompt"
   if [ -z "$sid" ]; then
     prompt="You are shipmate, a voice deploy assistant for this project. Use the /deploy skill for deploy, DNS, and provider work. The bridge switches to execute ONLY when the user's phrase ends with 'confirm', 'do it', 'send it', or 'ship it' — when telling the user how to proceed, quote one of those exactly; never invent another trigger word. $prompt"
   fi
@@ -255,6 +262,7 @@ turn() { # <phrase> <mode:plan|execute> <project dir>
       nohup bash "$SELF" --verify-live "$project" "$head_after" >/dev/null 2>&1 &
     fi
   fi
+  heard_record "$(ledger_channel)" "$pname" "$phrase" "${result:-no summary}"
   if [ -n "$result" ]; then printf '%s' "$result" | clip 1500
   else speak "Done, but Claude returned no summary. Check the Mac."; fi
 }
@@ -494,6 +502,90 @@ verb_brief() { # [push]
   else speak "$(bash "$b" | clip 1200)"; fi
 }
 
+# ---- memory: what it keeps across channels (skills/deploy/lib/memory.sh) ----------------------
+# Deterministic: your words are stored as said, matched by their words, and read back. A learned
+# name ("by the site I mean unakin") goes to the aliases file only when it names a real project.
+
+channel_words() { # siri → "on Siri" etc.
+  case "$1" in siri) printf 'on Siri' ;; claude-app) printf 'in the Claude app' ;; terminal) printf 'in the terminal' ;;
+    ship-button) printf 'from the Ship it button' ;; mcp-stdio) printf 'from Claude Code' ;; *) printf 'on %s' "${1:-an unknown channel}" ;; esac
+}
+ago_words() { local s=$(( $(date +%s) - ${1:-0} )); if [ "$s" -lt 120 ]; then printf 'just now'; else printf '%s ago' "$(sentinel_ago "$s")"; fi; }
+
+verb_remember() { # <body> [fact|reminder]
+  local body="$1" kind="${2:-fact}" alias name target dir rel already
+  export MEMORY_CHANNEL; MEMORY_CHANNEL="$(ledger_channel)"
+  [ -n "$body" ] || { speak "What should I remember? Say remember, then the thing."; return 0; }
+  if [ "$kind" = fact ] && alias="$(phrase_memory_alias "$(phrase_normalize "$body")")" && [ -n "$alias" ]; then
+    name="${alias%%|*}"; target="${alias#*|}"
+    dir="$(resolve_project "$target")"
+    if [ -n "$dir" ]; then
+      already="$(resolve_project "$name")"
+      if [ "$already" = "$dir" ]; then speak "I already take $name as $(basename "$dir")."; return 0; fi
+      rel="${dir#"$SITES_ROOT"/}"
+      printf '%s|%s\n' "$name" "$rel" >> "${SHIPMATE_ALIASES:-$HOME/.shipmate/aliases}"
+      memory_add alias "$name → $rel" "$(basename "$dir")" >/dev/null
+      speak "Got it: when you say $name, I'll take it as $(basename "$dir")."; return 0
+    fi
+    memory_add fact "$body" >/dev/null
+    speak "I don't know a project called $target, so I kept it as a note: $body."; return 0
+  fi
+  memory_add "$kind" "$body" >/dev/null
+  if [ "$kind" = reminder ]; then speak "I'll remind you to $body. It stays in your morning briefing until you say done with it."
+  else speak "Got it, I'll remember that $body."; fi
+}
+
+verb_forget() { # <body> <forget|done>
+  local body="$1" op="${2:-forget}" kind="" m n id k text
+  [ "$op" = done ] && kind=reminder
+  case "$body" in ""|that|this|the\ last\ one) m="$(memory_list "$kind" | tail -1)" ;; *) m="$(memory_find "$body" "$kind")" ;; esac
+  n="$(printf '%s' "$m" | awk 'NF' | wc -l | tr -d ' ')"
+  if [ "$n" = 0 ]; then
+    if [ "$op" = done ]; then speak "I don't have a reminder about $body."; else speak "I don't have anything about $body."; fi; return 0
+  fi
+  if [ "$n" -gt 1 ]; then
+    speak "That matches $n things: $(printf '%s\n' "$m" | awk -F'|' '{printf "%s%d, %s", (NR>1?"; ":""), NR, $4}'). Say it again with a few more words."; return 0
+  fi
+  IFS='|' read -r id k _ text <<EOF
+$m
+EOF
+  memory_close "$op" "$id"
+  if [ "$k" = alias ]; then  # unlearn the name too
+    local f="${SHIPMATE_ALIASES:-$HOME/.shipmate/aliases}" nm="${text%% → *}"
+    [ -f "$f" ] && awk -F'|' -v n="$nm" '$1 != n' "$f" > "$f.tmp" && mv "$f.tmp" "$f"
+  fi
+  if [ "$op" = done ]; then speak "Checked off: $text."; else speak "Forgotten: $text."; fi
+}
+
+verb_recall() {
+  local facts rem names line=""
+  facts="$(memory_list fact | awk -F'|' '{printf "%s%s", (NR>1?"; ":""), $4}')"
+  rem="$(memory_list reminder | while IFS='|' read -r _ _ t text; do printf '%s, from %s; ' "$text" "$(ago_words "$t")"; done | sed 's/; $//')"
+  names="$(memory_list alias | awk -F'|' '{printf "%s%s", (NR>1?"; ":""), $4}')"
+  [ -n "$facts" ] && line="I remember: $facts."
+  [ -n "$rem" ] && line="$line Reminders: $rem."
+  [ -n "$names" ] && line="$line Names: $names."
+  if [ -n "$line" ]; then speak "$(printf '%s' "${line# }" | clip 1200)"
+  else speak "Nothing yet. Say remember, then the thing, or remind me to, then the thing."; fi
+}
+
+verb_recap() {
+  local first=1 t ch proj said replied out="" nrem
+  while IFS='|' read -r t ch proj said replied; do
+    [ -n "$t" ] || continue
+    if [ "$first" = 1 ]; then
+      out="Last, $(ago_words "$t") $(channel_words "$ch")${proj:+, about $proj}: you said \"$said\", and I said: $(printf '%s' "$replied" | clip 220)"
+      first=0
+    else out="$out Before that, $(ago_words "$t") $(channel_words "$ch"): \"$said\"."; fi
+  done <<EOF
+$(heard_recent 3)
+EOF
+  nrem="$(memory_list reminder | awk 'NF' | wc -l | tr -d ' ')"
+  [ "$nrem" != 0 ] && out="$out You have $nrem open reminder$([ "$nrem" = 1 ] || echo s); say my reminders to hear them."
+  if [ -n "$out" ]; then speak "$(printf '%s' "${out# }" | clip 1400)"
+  else speak "I don't have a conversation on record yet."; fi
+}
+
 # ---- captain's log: deterministic journal append (your words, your publish gate) -----------
 
 # verb_log <body-with-optional-"to <project>"-prefix> <mode>
@@ -583,6 +675,7 @@ dispatch_job() { # <task phrase> <project dir>
   printf 'running'       > "$jdir/status"
   nohup bash "$SELF" --job-runner "$jdir" >/dev/null 2>&1 &
   printf '%s' "$!" > "$jdir/pid"
+  heard_record "$(ledger_channel)" "$(basename "$project")" "work on $task" "started job $id"
   speak "Job $id started on $(basename "$project"): $(printf '%s' "$task" | clip 100). I'll ping you when it's done, or ask me for status."
 }
 
@@ -783,6 +876,12 @@ case "${1:-}" in
     for a in "${@:3}"; do case "$a" in --yes) MODE="execute" ;; --forward) DIRN="forward" ;; esac; done
     verb_rollback "$PROJ" "$MODE" "$DIRN"; exit $? ;;
   --doctor)   verb_doctor; exit 0 ;;
+  --remember) # <fact|reminder> <text…> — the kind is always explicit, so no text reads as a flag
+    case "${2:-}" in fact|reminder) K="$2"; shift 2; verb_remember "$*" "$K"; exit 0 ;; esac
+    speak "usage: --remember <fact|reminder> <text>"; exit 1 ;;
+  --forget)   shift; verb_forget "$(phrase_normalize "$*")" forget; exit 0 ;;
+  --done)     shift; verb_forget "$(phrase_normalize "$*")" done; exit 0 ;;
+  --recall)   verb_recall; verb_recap; exit 0 ;;
   --briefing) if [ "${2:-}" = --push ]; then verb_brief push; else verb_brief; fi; exit 0 ;;
   --watchdog) verb_watchdog; exit 0 ;;
   --verify-live) verify_live "$2" "$3"; exit 0 ;;
@@ -835,6 +934,12 @@ case "$VERB" in
   counsel_off) counsel_toggle off ;;
   doctor)   verb_doctor ;;
   brief)    verb_brief ;;
+  remember) verb_remember "$(phrase_memory_body "$CLEAN")" fact ;;
+  remind)   verb_remember "$(phrase_memory_body "$CLEAN")" reminder ;;
+  forget)   verb_forget "$(phrase_memory_body "$CLEAN")" forget ;;
+  done)     verb_forget "$(phrase_memory_body "$CLEAN")" done ;;
+  recall)   verb_recall ;;
+  recap)    verb_recap ;;
   log)      verb_log "$(phrase_log_body "$CLEAN")" "$MODE" ;;
   rollback) verb_rollback "$(project_for "$CLEAN")" "$MODE" ;;
   rollforward) verb_rollback "$(project_for "$CLEAN")" "$MODE" forward ;;

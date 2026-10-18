@@ -61,7 +61,9 @@ inject env safely), **url** (the live URL), **allowlist/auth** (wire the app's s
   `lib/ledger.sh` — every gate decision appended to `~/.shipmate/ledger.jsonl` (facts only;
   consequences are human notes added with `bin/ledger.sh annotate`, never inferred) ·
   `lib/sentinel.sh` — the sentinel's confirm-then-announce state machine; its transitions go to
-  `~/.shipmate/sentinel.jsonl`, never the ledger
+  `~/.shipmate/sentinel.jsonl`, never the ledger · `lib/memory.sh` — what it remembers across
+  channels (facts, reminders, learned names; the conversation log) — context for the model,
+  never permission
 - `skills/deploy/lib/envspec.sh` — the tested, security-critical env classifier
 - `tests/` — run every `tests/test_*.sh` · `voice/` — the voice bridge (bridge + tested phrase
   parser in `voice/lib/`, which resolves a project by name, then alias, then how it sounds) · `mcp/` — the MCP server over the same engine (OAuth, passkeys, TOTP,
@@ -71,7 +73,7 @@ inject env safely), **url** (the live URL), **allowlist/auth** (wire the app's s
 - `install.sh` — link skills into `~/.claude/skills` + enable the secret hook
 
 ## Before you commit
-- [ ] every `tests/test_*.sh` green (env classifier, phrase parser, gate, deploy card, guardrails, MCP auth, ledger, providers, sentinel, briefing)
+- [ ] every `tests/test_*.sh` green (env classifier, phrase parser, gate, deploy card, guardrails, MCP auth, ledger, providers, sentinel, briefing, memory)
 - [ ] `bash skills/deploy/bin/doctor.sh` sane on your machine
 - [ ] no secret value in any committed file (the pre-commit hook enforces this)
 - [ ] no hardcoded usernames/refs — derived from context

@@ -133,6 +133,7 @@ async function signIn(clientId, scope, verdict = 'approved') {
   const toolNames = ((await r.json()).result.tools || []).map((t) => t.name);
   ok('valid token → tools', toolNames.length > 5, true);
   ok('the briefing is a tool', toolNames.includes('shipmate_briefing'), true);
+  ok('memory tools listed', ['shipmate_recall', 'shipmate_remember', 'shipmate_forget'].every((n) => toolNames.includes(n)), true);
   r = await rpc('forgedforgedforgedforgedforged', 'tools/list', {});
   ok('forged token → 401', r.status, 401);
   ok('invalid_token error', /error="invalid_token"/.test(r.headers.get('www-authenticate') || ''), true);
@@ -145,7 +146,8 @@ async function signIn(clientId, scope, verdict = 'approved') {
   const ro = await (await tok({ code: s3.loc.searchParams.get('code'), code_verifier: s3.verifier })).json();
   ok('read-only scope granted', ro.scope, 'shipmate:read');
   for (const [name, args] of [['shipmate_execute', { request: 'x' }], ['shipmate_task_start', { task: 'x' }],
-                              ['shipmate_log', { entry: 'x' }], ['shipmate_rollback', { confirm: true }], ['shipmate_counsel_toggle', { on: true }]]) {
+                              ['shipmate_log', { entry: 'x' }], ['shipmate_rollback', { confirm: true }], ['shipmate_counsel_toggle', { on: true }],
+                              ['shipmate_remember', { text: 'x' }], ['shipmate_forget', { text: 'x' }]]) {
     const out = await (await rpc(ro.access_token, 'tools/call', { name, arguments: args })).json();
     ok(`read token can't ${name}`, out.result && out.result.isError && /needs the shipmate:execute scope/.test(out.result.content[0].text), true);
   }

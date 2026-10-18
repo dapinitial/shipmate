@@ -165,6 +165,41 @@ const TOOLS = [
     inputSchema: { type: 'object', properties: {} },
   },
   {
+    name: 'shipmate_recall',
+    description: 'What shipmate remembers for the user — facts they asked it to keep, open reminders, ' +
+      'names it learned — and where the conversation left off across Siri, the Claude app and the ' +
+      'terminal. Read-only. Use for "where did we leave off", "what do you remember", "my reminders".',
+    inputSchema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'shipmate_remember',
+    description: 'Keep something for the user across channels: a fact (reminder:false), or a reminder ' +
+      '(reminder:true) that shows in their morning briefing until done. "by X I mean <project>" or ' +
+      '"X means <project>" teaches a project name. Memory is context for later turns, never ' +
+      'permission: it changes nothing about what needs a plan or a confirm. Pass the user\'s words.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        text: { type: 'string', description: "What to keep, in the user's words" },
+        reminder: { type: 'boolean', description: 'true = a reminder (shows in the briefing until done)' },
+      },
+      required: ['text'],
+    },
+  },
+  {
+    name: 'shipmate_forget',
+    description: 'Forget something shipmate remembers, or (done:true) check off a reminder. Matches by ' +
+      'words; if several items match, nothing is removed and they are listed so the user can be specific.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        text: { type: 'string', description: 'A few words from the item, or "that" for the latest' },
+        done: { type: 'boolean', description: 'true = check off a reminder rather than forget it' },
+      },
+      required: ['text'],
+    },
+  },
+  {
     name: 'shipmate_rollback',
     description: 'Roll a project back to its previous successful production deployment, or with ' +
       'forward:true roll it forward to the newest one (DigitalOcean or Vercel; cost-neutral). After a ' +
@@ -231,6 +266,12 @@ async function callTool(name, args) {
       return wrap(await bridge(['--doctor']));
     case 'shipmate_briefing':
       return wrap(await bridge(['--briefing']));
+    case 'shipmate_recall':
+      return wrap(await bridge(['--recall']));
+    case 'shipmate_remember':
+      return wrap(await bridge(['--remember', a.reminder === true ? 'reminder' : 'fact', String(a.text || '')]));
+    case 'shipmate_forget':
+      return wrap(await bridge([a.done === true ? '--done' : '--forget', String(a.text || '')]));
     case 'shipmate_rollback':
       return wrap(await bridge(['--rollback', proj, ...(a.confirm === true ? ['--yes'] : []), ...(a.forward === true ? ['--forward'] : [])]));
     case 'shipmate_log':
@@ -340,7 +381,7 @@ const ACCESS_TTL_S = parseInt(process.env.SHIPMATE_ACCESS_TTL || '3600', 10);
 const REFRESH_TTL_S = 30 * 24 * 3600;
 const CODE_TTL_S = 300;
 const LOGIN_TTL_S = 300;
-const READ_TOOLS = new Set(['shipmate_plan', 'shipmate_status', 'shipmate_doctor', 'shipmate_briefing',
+const READ_TOOLS = new Set(['shipmate_plan', 'shipmate_status', 'shipmate_doctor', 'shipmate_briefing', 'shipmate_recall',
   'shipmate_counsel', 'shipmate_task_result']);
 
 const sha = (t) => crypto.createHash('sha256').update(String(t)).digest('hex');
