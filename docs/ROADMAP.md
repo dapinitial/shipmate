@@ -61,10 +61,13 @@ changes production still goes through the same plan → grant → execute gate.
    - an **outside dead-man's switch** (a free uptime check on the Funnel URL that pushes when the
      host itself goes dark — the sentinel can't report its own death);
    - a **backup + tested restore** of `~/.shipmate` (ledger, memory, OAuth/passkeys, aliases).
-2. **Make the ledger credible.** The portfolio's guard was overridden 19 times in one evening
-   with the catch-all `SHIPMATE_ALLOW=1` (plus one entry filed under "hotfix"). Fit
-   `.shipmate.yml`'s cap/protected list to how that repo is really worked, or have the session
-   name the rule it skips; assess the overrides with `ledger.sh annotate`.
+2. **Make the ledger credible.**
+   - [x] The cause, measured (2026-10-17): every portfolio override was the 40-file cap, and every
+     one was a relock of `content-locked/` (~280 generated files). Authored changes never passed
+     28 files a commit. `.shipmate.yml` now lists it under `generated:` (uncounted, still
+     protected-checked); overrides record the counts they waived.
+   - [ ] Assess the 51 historical overrides with `ledger.sh annotate` (a human judgment), and
+     look at the one entry filed under "hotfix".
 3. **One-tap rollback from the sentinel.** When the sentinel confirms a site down and the host
    has a previous good deployment, the push carries **Roll back** (tailnet-only button, like
    Ship it). Design:

@@ -72,7 +72,7 @@ has "override recorded"  "$(tail -1 "$SHIPMATE_LEDGER")" '"outcome":"overridden"
 # A blanket override records one line PER rule it actually covered, not one generic line: this
 # push waves through both the wrong remote and the protected .env, and the record now says so.
 has "override names the remote rule"    "$(tail -2 "$SHIPMATE_LEDGER")" '"detail":"SHIPMATE_ALLOW=remote"'
-has "override names the protected rule" "$(tail -1 "$SHIPMATE_LEDGER")" '"detail":"SHIPMATE_ALLOW=protected"'
+has "override names the protected rule, and the file" "$(tail -1 "$SHIPMATE_LEDGER")" '"detail":"SHIPMATE_ALLOW=protected; .env"'
 ok  "four new lines"     "$(( $(wc -l < "$SHIPMATE_LEDGER") - before ))" 4
 # And the dictation report reads phrase-parser misses back out of the same record.
 bash "$BIN/ledger.sh" record phrase-parser unresolved - "deploy anakin" "no project matched by name or sound" >/dev/null

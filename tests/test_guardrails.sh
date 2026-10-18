@@ -100,6 +100,24 @@ has "cap reason"       "$out" "would change 5 files; this project's cap is 3"
 G "$R" reset -q --hard origin/main
 printf 'max_files: 3\n' > "$R/.shipmate.yml"; echo x > "$R/x.txt"; G "$R" add -A; G "$R" commit -q -m two
 ok "under cap ok"      "$(G "$R" push -q origin main >/dev/null 2>&1; echo $?)" 0
+echo "  generated paths ride along uncounted:"
+printf 'max_files: 3\ngenerated:\n  - dist/\n  - "*.enc"\nprotected:\n  - dist/private/\n' > "$R/.shipmate.yml"
+ok "generated: dir tree"       "$(project_is_generated "$R" dist/app/x.js; echo $?)" 0
+ok "generated: basename glob"  "$(project_is_generated "$R" locked/a.js.enc; echo $?)" 0
+ok "not generated"             "$(project_is_generated "$R" src/a.js; echo $?)" 1
+ok "no generated key, nothing is" "$(project_is_generated "$P" dist/x.js; echo $?)" 1
+mkdir -p "$R/dist/app" "$R/locked"; for i in 1 2 3 4 5 6 7 8; do echo $i > "$R/dist/app/c$i.js"; echo $i > "$R/locked/k$i.enc"; done
+echo y > "$R/y.txt"; G "$R" add -A; G "$R" commit -q -m rebuild
+ok "a rebuild of 16 generated + 2 authored files passes a cap of 3" "$(G "$R" push -q origin main >/dev/null 2>&1; echo $?)" 0
+for i in 1 2 3 4; do echo $i > "$R/g$i.txt"; echo z > "$R/dist/app/z$i.js"; done; G "$R" add -A; G "$R" commit -q -m big
+out="$(G "$R" push origin main 2>&1)"; ok "authored files still count" "$?" 1
+has "the reason names both counts" "$out" "would change 4 files (plus 4 generated); this project's cap is 3"
+: > "$SHIPMATE_LEDGER"; SHIPMATE_ALLOW=max-files G "$R" push -q origin main >/dev/null 2>&1
+has "an override records the counts it waived" "$(cat "$SHIPMATE_LEDGER")" '"detail":"SHIPMATE_ALLOW=max-files; 4 files (plus 4 generated); cap 3"'
+mkdir -p "$R/dist/private"; echo s > "$R/dist/private/key.txt"; G "$R" add -A; G "$R" commit -q -m leak
+out="$(G "$R" push origin main 2>&1)"; ok "generated never means unguarded" "$?" 1
+has "…protected still applies"  "$out" "'dist/private/key.txt' is a protected path"
+G "$R" reset -q --hard origin/main
 echo "  project-defined remote:"
 printf 'deploy_remote: mirror\n' > "$R/.shipmate.yml"; G "$R" add -A; G "$R" commit -q -m cfg
 out="$(G "$R" push origin main 2>&1)"; ok "origin refused when mirror is the deploy remote" "$?" 1

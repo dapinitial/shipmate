@@ -55,7 +55,7 @@ inject env safely), **url** (the live URL), **allowlist/auth** (wire the app's s
 - `skills/deploy/lib/provider.sh` — which host deploys a project (`provider:` in `.shipmate.yml`,
   else `.do/app.yaml`, else `.vercel/project.json`)
 - `skills/deploy/lib/project.sh` — per-project `.shipmate.yml` (deploy remote, branch, file cap,
-  protected paths, health URL) · `lib/pre-push.hook` — the guard installed per clone; an override
+  protected paths, generated paths that don't count toward the cap, health URL) · `lib/pre-push.hook` — the guard installed per clone; an override
   names the rule it is skipping (`SHIPMATE_ALLOW=remote|max-files|protected`), and one that
   covered nothing is not recorded, so the ledger counts bypasses rather than habits ·
   `lib/ledger.sh` — every gate decision appended to `~/.shipmate/ledger.jsonl` (facts only;

@@ -23,7 +23,7 @@ allowed() {                            # <rule> — may this push skip that rule
   case ",$ALLOW," in *",$1,"*) return 0 ;; esac
   return 1
 }
-waived() { ledger_record pre-push:override overridden "$2" "git push $remote" "SHIPMATE_ALLOW=$1" >/dev/null; }
+waived() { ledger_record pre-push:override overridden "$2" "git push $remote" "SHIPMATE_ALLOW=$1${3:+; $3}" >/dev/null; } # <rule> <project> [facts]
 
 if [ -f "$LIB/project.sh" ]; then . "$LIB/project.sh"; else
   echo "shipmate pre-push: library missing at $LIB — reinstall with install-hooks.sh (allowing push)"; exit 0; fi
@@ -43,18 +43,26 @@ while read -r lref lsha rref rsha; do
   if [ "$rsha" = "$z" ]; then base="$(git merge-base "$lsha" "$want/$(project_branch "$root")" 2>/dev/null || echo "$lsha^")"
   else base="$rsha"; fi
   files="$(git diff --name-only "$base" "$lsha" 2>/dev/null)"
-  n="$(printf '%s\n' "$files" | awk 'NF' | wc -l | tr -d ' ')"
+  # the cap counts authored files; paths the project lists as generated ride along uncounted
+  n=0; g=0
+  while IFS= read -r f; do
+    [ -n "$f" ] || continue
+    if project_is_generated "$root" "$f"; then g=$((g + 1)); else n=$((n + 1)); fi
+  done <<EOF
+$files
+EOF
+  gen=""; [ "$g" -gt 0 ] && gen=" (plus $g generated)"
   if [ "$n" -gt "$cap" ]; then
-    if allowed max-files; then waived max-files "$proj"; else
-      ledger_record pre-push:max-files refused "$proj" "git push ${rref#refs/heads/}" "$n files changed; cap $cap" >/dev/null
-      echo "✗ shipmate: pushing ${rref#refs/heads/} would change $n files; this project's cap is $cap (.shipmate.yml max_files)."
+    if allowed max-files; then waived max-files "$proj" "$n files$gen; cap $cap"; else
+      ledger_record pre-push:max-files refused "$proj" "git push ${rref#refs/heads/}" "$n files changed$gen; cap $cap" >/dev/null
+      echo "✗ shipmate: pushing ${rref#refs/heads/} would change $n files$gen; this project's cap is $cap (.shipmate.yml max_files)."
       echo "  Split the change, or push deliberately: SHIPMATE_ALLOW=max-files git push …"; bad=1
     fi
   fi
   while IFS= read -r f; do
     [ -n "$f" ] || continue
     if project_is_protected "$root" "$f"; then
-      if allowed protected; then waived protected "$proj"; else
+      if allowed protected; then waived protected "$proj" "$f"; else
         ledger_record pre-push:protected refused "$proj" "git push ${rref#refs/heads/}" "touches $f" >/dev/null
         echo "✗ shipmate: '$f' is a protected path (.shipmate.yml protected / secrets default); refusing to push it."
         echo "  If that file really belongs upstream: SHIPMATE_ALLOW=protected git push …"; bad=1

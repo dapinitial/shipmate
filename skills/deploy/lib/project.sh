@@ -12,6 +12,8 @@
 #     - .env
 #     - .env.*
 #     - site/case-studies/apple/
+#   generated:                     # build output a push may carry without counting toward
+#     - content-locked/            #   max_files (same globs); still checked against protected
 #
 # Every reader takes the project dir, tolerates a missing file, and returns the default.
 # Sourced by preflight.sh, the pre-push hook and the bridge; tested in tests/test_guardrails.sh.
@@ -56,18 +58,31 @@ project_protected() { # <dir> — every protected pattern, defaults + the projec
   project_list "$1" protected
 }
 
-project_is_protected() { # <dir> <path> — exit 0 when <path> matches a protected pattern
+project_path_matches() { # <path> <patterns, one per line> — exit 0 when any pattern matches
   local pat base
-  base="$(basename "$2")"
+  base="$(basename "$1")"
   while IFS= read -r pat; do
     [ -n "$pat" ] || continue
     case "$pat" in
-      */) case "$2" in "$pat"*|*"/$pat"*) return 0 ;; esac ;;          # directory: whole tree
-      */*) case "$2" in $pat) return 0 ;; esac ;;                          # path glob
+      */) case "$1" in "$pat"*|*"/$pat"*) return 0 ;; esac ;;          # directory: whole tree
+      */*) case "$1" in $pat) return 0 ;; esac ;;                          # path glob
       *)  case "$base" in $pat) return 0 ;; esac ;;                        # basename glob
     esac
   done <<EOF
-$(project_protected "$1")
+$2
 EOF
   return 1
+}
+
+project_is_protected() { # <dir> <path> — exit 0 when <path> matches a protected pattern
+  project_path_matches "$2" "$(project_protected "$1")"
+}
+
+# Generated paths (build output committed on purpose, e.g. an encrypted bundle that a rebuild
+# rewrites wholesale) don't count toward max_files: the cap exists to catch a change too big to
+# have been meant, and a rebuild's churn says nothing about that. They are still checked
+# against protected — "generated" never means "unguarded".
+project_is_generated() { # <dir> <path> — exit 0 when <path> matches a generated pattern
+  local g; g="$(project_list "$1" generated)"
+  [ -n "$g" ] && project_path_matches "$2" "$g"
 }
