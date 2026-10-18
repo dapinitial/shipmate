@@ -62,9 +62,10 @@ changes production still goes through the same plan → grant → execute gate.
      host itself goes dark — the sentinel can't report its own death);
    - a **backup + tested restore** of `~/.shipmate` (ledger, memory, OAuth/passkeys, aliases).
 2. **Make the ledger credible.**
-   - [x] The cause, measured (2026-10-17): every portfolio override was the 40-file cap, and every
-     one was a relock of `content-locked/` (~280 generated files). Authored changes never passed
-     28 files a commit. `.shipmate.yml` now lists it under `generated:` (uncounted, still
+   - [x] The cause, measured (2026-10-17): the 11 overrides that named a rule all named the
+     40-file cap (the 40 earlier catch-alls never recorded which rule), and every portfolio commit
+     over the cap since Oct 10 was over it because of `content-locked/` (~280 generated files a
+     relock). Authored changes never passed 28 files a commit. `.shipmate.yml` now lists it under `generated:` (uncounted, still
      protected-checked); overrides record the counts they waived.
    - [ ] Assess the 51 historical overrides with `ledger.sh annotate` (a human judgment), and
      look at the one entry filed under "hotfix".
