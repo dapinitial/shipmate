@@ -11,7 +11,7 @@ Even app on your phone; the glasses render it and send gestures back).
 
 *Captured from the official Even Hub simulator against the live shipmate server.*
 
-**Gestures:** swipe up/down moves between Fleet, Plan and Gate · tap refreshes · double-tap
+**Gestures:** swipe up/down moves between Fleet, Brief (the morning briefing as short lines), Plan and Gate · tap refreshes · double-tap
 jumps to the fleet. It refreshes itself every minute.
 
 **It can't ship.** The glasses pair with a read-only token (`shipmate:read`). There is no

@@ -1,9 +1,12 @@
 #!/usr/bin/env bash
 # install-launchagents.sh — keep the shipmate servers alive across crashes and reboots.
 #
-# Installs two macOS LaunchAgents for the current user:
+# Installs macOS LaunchAgents for the current user:
 #   com.shipmate.mcp-http     — shipmate-mcp --http 8788    (the Claude-app connector)
 #   com.shipmate.mcp-onboard  — shipmate-mcp --onboard 8790 (tailnet-only device onboarding)
+#   com.shipmate.queue-flush  — replays dead-zone intents (every minute)
+#   com.shipmate.watchdog     — the sentinel + fleet hosts (every 5 minutes)
+#   com.shipmate.briefing     — the morning briefing push (daily at SHIPMATE_BRIEFING_AT, 07:30)
 #
 # Idempotent: safe to re-run after every git pull (it reloads the agents). All paths are
 # derived — repo from this script's location, node from PATH, user from whoami.
@@ -34,12 +37,17 @@ NODE="$(command -v node || true)"
 
 # label → kind|args, one per service (bash 3.2: no associative arrays).
 # kind=server → node shipmate-mcp.js, KeepAlive. kind=timer → bash bridge, StartInterval.
+# kind=daily → bash bridge with --push, once a day at HH:MM local time (not at load: a reinstall
+# or a login must not send a second morning briefing).
+[ -f "$HOME/.shipmate/voice.env" ] && BRIEF_AT="$(sed -nE 's/^(export )?SHIPMATE_BRIEFING_AT=["'\'']?([0-9]{1,2}:[0-9]{2}).*/\2/p' "$HOME/.shipmate/voice.env" | tail -1)"
+BRIEF_AT="${SHIPMATE_BRIEFING_AT:-${BRIEF_AT:-07:30}}"
 services() {
   printf '%s\n' \
     "com.shipmate.mcp-http|server|--http|8788" \
     "com.shipmate.mcp-onboard|server|--onboard|8790" \
     "com.shipmate.queue-flush|timer|--flush-queue|60" \
-    "com.shipmate.watchdog|timer|--watchdog|300"
+    "com.shipmate.watchdog|timer|--watchdog|300" \
+    "com.shipmate.briefing|daily|--briefing|$BRIEF_AT"
 }
 
 remove_all() {
@@ -69,10 +77,15 @@ services | while IFS='|' read -r label kind mode extra; do
   if [ "$kind" = "server" ]; then
     prog="<string>$NODE</string><string>$SERVER</string><string>$mode</string><string>$extra</string>"
     sched="<key>KeepAlive</key><true/><key>ThrottleInterval</key><integer>15</integer>"
+  elif [ "$kind" = "daily" ]; then
+    prog="<string>/bin/bash</string><string>$BRIDGE</string><string>$mode</string><string>--push</string>"
+    h="${extra%%:*}"; m="${extra#*:}"
+    sched="<key>StartCalendarInterval</key><dict><key>Hour</key><integer>$((10#$h))</integer><key>Minute</key><integer>$((10#$m))</integer></dict>"
   else
     prog="<string>/bin/bash</string><string>$BRIDGE</string><string>$mode</string>"
     sched="<key>StartInterval</key><integer>$extra</integer>"
   fi
+  atload="<true/>"; [ "$kind" = "daily" ] && atload="<false/>"
   cat > "$plist" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -81,7 +94,7 @@ services | while IFS='|' read -r label kind mode extra; do
   <key>Label</key><string>$label</string>
   <key>ProgramArguments</key>
   <array>$prog</array>
-  <key>RunAtLoad</key><true/>
+  <key>RunAtLoad</key>$atload
   $sched
   <key>EnvironmentVariables</key>
   <dict>
@@ -99,5 +112,5 @@ EOF
 done
 
 echo
-echo "Both agents load at login and restart on crash. Check:  launchctl list | grep shipmate"
+echo "The agents load at login; servers restart on crash. Check:  launchctl list | grep shipmate"
 echo "Reminder: 'tailscale funnel --bg 8788' persists on its own across reboots."

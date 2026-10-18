@@ -26,10 +26,11 @@ sentinel_clean() { printf '%s' "${1:-}" | tr '|\t\n\r' '/   ' | cut -c1-200; }
 
 sentinel_str() { printf '"%s"' "$(printf '%s' "${1:-}" | tr '\n\r\t' '   ' | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' | cut -c1-300)"; }
 
-sentinel_log() { # <key> <open|clear> <detail>
+sentinel_log() { # <key> <open|clear> <detail> [seconds it lasted, on clear]
   mkdir -p "$(dirname "$SENTINEL_LOG")" 2>/dev/null || return 0
-  printf '{"ts":"%s","type":"observation","project":%s,"check":%s,"outcome":"%s","detail":%s}\n' \
-    "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$(sentinel_str "${1%.*}")" "$(sentinel_str "${1##*.}")" "$2" "$(sentinel_str "$3")" >> "$SENTINEL_LOG" 2>/dev/null || true
+  printf '{"ts":"%s","type":"observation","project":%s,"check":%s,"outcome":"%s","detail":%s%s}\n' \
+    "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$(sentinel_str "${1%.*}")" "$(sentinel_str "${1##*.}")" "$2" "$(sentinel_str "$3")" \
+    "${4:+,\"lasted\":$4}" >> "$SENTINEL_LOG" 2>/dev/null || true
   chmod 600 "$SENTINEL_LOG" 2>/dev/null || true
 }
 
@@ -46,7 +47,7 @@ sentinel_step() {
     skip) return 0 ;;
     ok)
       if [ "$state" = open ]; then
-        printf 'ok|0|%s||\n' "$now" > "$file"; sentinel_log "$key" clear "$odtl"
+        printf 'ok|0|%s||\n' "$now" > "$file"; sentinel_log "$key" clear "$odtl" "$((now - since))"
         printf 'clear %s\n' "$((now - since))"
       elif [ "$count" != 0 ] || [ ! -f "$file" ]; then printf 'ok|0|%s||\n' "$now" > "$file"; fi ;;
     bad)

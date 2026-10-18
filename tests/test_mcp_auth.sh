@@ -130,7 +130,9 @@ async function signIn(clientId, scope, verdict = 'approved') {
 
   console.log('the MCP endpoint:');
   r = await rpc(full.access_token, 'tools/list', {});
-  ok('valid token → tools', ((await r.json()).result.tools || []).length > 5, true);
+  const toolNames = ((await r.json()).result.tools || []).map((t) => t.name);
+  ok('valid token → tools', toolNames.length > 5, true);
+  ok('the briefing is a tool', toolNames.includes('shipmate_briefing'), true);
   r = await rpc('forgedforgedforgedforgedforged', 'tools/list', {});
   ok('forged token → 401', r.status, 401);
   ok('invalid_token error', /error="invalid_token"/.test(r.headers.get('www-authenticate') || ''), true);
@@ -319,6 +321,8 @@ async function signIn(clientId, scope, verdict = 'approved') {
   ok('glance with device token', r.status, 200);
   const g = await r.json();
   ok('fleet is a list', Array.isArray(g.fleet), true);
+  ok('the briefing rides along as lines', Array.isArray(g.brief) && /^since /.test(g.brief[0]) && g.brief.some((l) => l.startsWith('!! shop down')), true);
+  ok('reading the glance starts no new briefing window', fs.existsSync(path.join(tmp, 'home/.shipmate/briefing.last')), false);
   ok('only open sentinel problems are alerts', JSON.stringify(g.alerts), '[{"project":"shop","what":"down","since":"2026-10-17T01:20:00.000Z"}]');
   ok('reconstructed entry flagged', g.events[0].project === 'hist' && g.events[0].reconstructed, true);
   ok('live entries are not flagged', g.events.slice(1).some((e) => e.reconstructed), false);

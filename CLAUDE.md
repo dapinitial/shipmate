@@ -50,7 +50,8 @@ inject env safely), **url** (the live URL), **allowlist/auth** (wire the app's s
   `preflight.sh` (deterministic checks before an execute turn), `install-hooks.sh` (the pre-push guard),
   `ledger.sh` (report/annotate the decision ledger; `report --dictation` lists the phrases that
   named no project, which is where dictation aliases come from), `sentinel.sh` (shipmate speaks
-  first: site down, failed deploy, expiring cert — announced once, recovery once; observes only)
+  first: site down, failed deploy, expiring cert — announced once, recovery once; observes only),
+  `briefing.sh` (what needs you + what happened since the last morning briefing; facts only, no model)
 - `skills/deploy/lib/provider.sh` — which host deploys a project (`provider:` in `.shipmate.yml`,
   else `.do/app.yaml`, else `.vercel/project.json`)
 - `skills/deploy/lib/project.sh` — per-project `.shipmate.yml` (deploy remote, branch, file cap,
@@ -70,7 +71,7 @@ inject env safely), **url** (the live URL), **allowlist/auth** (wire the app's s
 - `install.sh` — link skills into `~/.claude/skills` + enable the secret hook
 
 ## Before you commit
-- [ ] every `tests/test_*.sh` green (env classifier, phrase parser, gate, deploy card, guardrails, MCP auth, ledger, providers, sentinel)
+- [ ] every `tests/test_*.sh` green (env classifier, phrase parser, gate, deploy card, guardrails, MCP auth, ledger, providers, sentinel, briefing)
 - [ ] `bash skills/deploy/bin/doctor.sh` sane on your machine
 - [ ] no secret value in any committed file (the pre-commit hook enforces this)
 - [ ] no hardcoded usernames/refs — derived from context

@@ -2,20 +2,21 @@
 // is tested in Node and behaves the same in the simulator and on the glasses.
 //
 // The display is 576×288, monochrome green. One full-screen text container; LINE_CHARS and
-// MAX_LINES keep every view inside it. Views: fleet → plan → recent decisions (swipe to move).
+// MAX_LINES keep every view inside it. Views: fleet → brief → plan → recent decisions (swipe to move).
 
 export type Phase = 'LIVE' | 'SUPERSEDED' | 'BUILDING' | 'PENDING' | 'FAILED' | 'UNKNOWN' | string;
 export interface Glance {
   generated: string;
   fleet: { name: string; provider: string; phase: Phase; alert?: string; since?: string }[];
   alerts?: { project: string; what: string; since: string }[]; // what the sentinel has open
+  brief?: string[]; // bin/briefing.sh --lines: "since …", then what needs you, then what happened
   plan: { project: string; minutesLeft: number } | null;
   events: { ts: string; policy: string; outcome: string; project: string; detail: string; reconstructed?: boolean }[];
 }
 
 export const LINE_CHARS = 44; // the G2 font is proportional: ~55 narrow chars fit; 44 leaves room for wide ones
 export const MAX_LINES = 10; // ~27 px per line in 288 px
-export const VIEWS = ['fleet', 'plan', 'events'] as const;
+export const VIEWS = ['fleet', 'brief', 'plan', 'events'] as const;
 export type View = (typeof VIEWS)[number];
 
 const clip = (s: string, n = LINE_CHARS) => (s.length > n ? s.slice(0, n - 1) + '…' : s);
@@ -77,6 +78,11 @@ export function render(g: Glance | null, view: View, now = new Date(), error = '
       lines.push(clip(a.alert ? `!! ${a.name} ${a.alert} ${ago(a.since ?? g.generated, now)}` : `${mark(a.phase)} ${a.name}`));
     }
     if (shown.length > room) lines.push(`+${shown.length - (room - 1)} more`);
+  } else if (view === 'brief') {
+    const [since, ...rest] = g.brief ?? [];
+    lines.push(head(since ? `BRIEF ${since}` : 'BRIEF'));
+    if (!rest.length) lines.push('', since ? 'nothing to report' : 'no briefing yet');
+    for (const l of rest.slice(0, MAX_LINES - 1)) lines.push(l);
   } else if (view === 'plan') {
     lines.push(head('PLAN'));
     if (g.plan) {

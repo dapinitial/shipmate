@@ -82,6 +82,7 @@ authenticator for passkeys and RFC 6238 codes for the app (118 assertions).
 | `shipmate_task_result` | a finished job's summary | read-only |
 | `shipmate_task_stop` | stop a running job | — |
 | `shipmate_doctor` | one-sentence health check (net, tailnet, servers, auth, disk, jobs, queue) | read-only, deterministic |
+| `shipmate_briefing` | what needs you now + what happened since the last morning briefing | read-only, deterministic |
 | `shipmate_log` | timestamped captains-log entry, committed verbatim | deterministic; pushes only with `publish:true` |
 | `shipmate_rollback` | revert to the previous successful deployment (DO) | describe-only unless `confirm:true`; deterministic |
 | `shipmate_counsel` | deliberate on a question (single model, or multi-model panel + dissent when the toggle is on) | read-only always |

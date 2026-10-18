@@ -103,8 +103,19 @@ test('ago buckets', () => {
   assert.equal(ago('2026-10-10T12:00:00Z', now), '4d');
 });
 
+test('brief view: the window in the header, then the lines, and it fits', () => {
+  const out = render(g({ brief: ['since yday 7:30 AM', '!! unakin down 2h', 'shipped rillet, unakin x2', ...Array(12).fill('job 9 an-extraordinarily-long-project-name-indeed done')] }), 'brief', now);
+  const lines = out.split('\n');
+  assert.equal(lines[0], 'SHIPMATE · BRIEF since yday 7:30 AM');
+  assert.equal(lines[1], '!! unakin down 2h');
+  fits(out);
+  assert.match(render(g({ brief: ['since 7:30 AM'] }), 'brief', now), /nothing to report/);
+  assert.match(render(g(), 'brief', now), /no briefing yet/);
+});
+
 test('views cycle both ways', () => {
-  assert.equal(nextView('fleet', 1), 'plan');
+  assert.equal(nextView('fleet', 1), 'brief');
+  assert.equal(nextView('brief', 1), 'plan');
   assert.equal(nextView('events', 1), 'fleet');
   assert.equal(nextView('fleet', -1), 'events');
 });

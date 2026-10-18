@@ -74,6 +74,7 @@ Machine interface (no phrase parsing — used by mcp/shipmate-mcp.js):
   --rollback <project|-> [--yes] | --doctor       lifecycle + health
   --flush-queue                                   replay queued dead-zone intents
   --watchdog                                      sentinel + fleet hosts; push on transitions
+  --briefing [--push]                             say (or push, and start the next window) the briefing
   --verify-live <project-dir> <sha>               push one line when that commit's deploy is live
 
 The gate: execute turns consume a single-use grant minted by a plan for the same project within
@@ -483,6 +484,16 @@ verb_watchdog() { # timer: probe fleet hosts, then every live project; push only
   done < "$HOSTS_FILE"
 }
 
+# ---- the briefing: what happened since the last one, and what needs you ----------------------
+# Deterministic (bin/briefing.sh reads shipmate's own records; no model). Spoken on request
+# ("good morning", "what did I miss"); pushed once a day by the com.shipmate.briefing timer,
+# which also starts the next window — so asking later in the day covers everything since.
+verb_brief() { # [push]
+  local b="$VOICE_DIR/../skills/deploy/bin/briefing.sh"
+  if [ "${1:-}" = push ]; then notify "$(bash "$b" --mark | clip 1500)"
+  else speak "$(bash "$b" | clip 1200)"; fi
+}
+
 # ---- captain's log: deterministic journal append (your words, your publish gate) -----------
 
 # verb_log <body-with-optional-"to <project>"-prefix> <mode>
@@ -772,6 +783,7 @@ case "${1:-}" in
     for a in "${@:3}"; do case "$a" in --yes) MODE="execute" ;; --forward) DIRN="forward" ;; esac; done
     verb_rollback "$PROJ" "$MODE" "$DIRN"; exit $? ;;
   --doctor)   verb_doctor; exit 0 ;;
+  --briefing) if [ "${2:-}" = --push ]; then verb_brief push; else verb_brief; fi; exit 0 ;;
   --watchdog) verb_watchdog; exit 0 ;;
   --verify-live) verify_live "$2" "$3"; exit 0 ;;
   --log)
@@ -822,6 +834,7 @@ case "$VERB" in
   counsel_on)  counsel_toggle on ;;
   counsel_off) counsel_toggle off ;;
   doctor)   verb_doctor ;;
+  brief)    verb_brief ;;
   log)      verb_log "$(phrase_log_body "$CLEAN")" "$MODE" ;;
   rollback) verb_rollback "$(project_for "$CLEAN")" "$MODE" ;;
   rollforward) verb_rollback "$(project_for "$CLEAN")" "$MODE" forward ;;

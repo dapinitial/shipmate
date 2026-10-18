@@ -157,6 +157,14 @@ const TOOLS = [
     inputSchema: { type: 'object', properties: {} },
   },
   {
+    name: 'shipmate_briefing',
+    description: 'The briefing: what needs the user now (sites down, approvals, an armed plan) and ' +
+      'what happened since their last morning briefing (outages and recoveries, ships, live checks, ' +
+      'gate refusals and overrides, finished jobs). Facts from shipmate\'s own records, no model; ' +
+      'read-only. Use for "good morning", "what did I miss", "catch me up".',
+    inputSchema: { type: 'object', properties: {} },
+  },
+  {
     name: 'shipmate_rollback',
     description: 'Roll a project back to its previous successful production deployment, or with ' +
       'forward:true roll it forward to the newest one (DigitalOcean or Vercel; cost-neutral). After a ' +
@@ -221,6 +229,8 @@ async function callTool(name, args) {
       return wrap(await bridge(['--stop', ...(a.job_id != null ? [String(a.job_id)] : [])]));
     case 'shipmate_doctor':
       return wrap(await bridge(['--doctor']));
+    case 'shipmate_briefing':
+      return wrap(await bridge(['--briefing']));
     case 'shipmate_rollback':
       return wrap(await bridge(['--rollback', proj, ...(a.confirm === true ? ['--yes'] : []), ...(a.forward === true ? ['--forward'] : [])]));
     case 'shipmate_log':
@@ -330,7 +340,7 @@ const ACCESS_TTL_S = parseInt(process.env.SHIPMATE_ACCESS_TTL || '3600', 10);
 const REFRESH_TTL_S = 30 * 24 * 3600;
 const CODE_TTL_S = 300;
 const LOGIN_TTL_S = 300;
-const READ_TOOLS = new Set(['shipmate_plan', 'shipmate_status', 'shipmate_doctor',
+const READ_TOOLS = new Set(['shipmate_plan', 'shipmate_status', 'shipmate_doctor', 'shipmate_briefing',
   'shipmate_counsel', 'shipmate_task_result']);
 
 const sha = (t) => crypto.createHash('sha256').update(String(t)).digest('hex');
@@ -639,6 +649,16 @@ function sentinelAlerts() {
   }
   return out;
 }
+// The briefing as short lines (bin/briefing.sh --lines), cached like the fleet: the glasses'
+// BRIEF view. Reading it never starts a new briefing window.
+const briefCache = { ts: 0, lines: [] };
+function glanceBrief(cb) {
+  if (Date.now() - briefCache.ts < 60000) return cb(briefCache.lines);
+  execFile('bash', [path.join(__dirname, '..', 'skills', 'deploy', 'bin', 'briefing.sh'), '--lines'], { timeout: 15000 }, (err, stdout) => {
+    const lines = err ? [] : String(stdout || '').trim().split('\n').filter(Boolean).slice(0, 12);
+    briefCache.ts = Date.now(); briefCache.lines = lines; cb(lines);
+  });
+}
 function glanceEvents(n) {
   const file = process.env.SHIPMATE_LEDGER || path.join(os.homedir(), '.shipmate', 'ledger.jsonl');
   let lines = []; try { lines = fs.readFileSync(file, 'utf8').trim().split('\n'); } catch {}
@@ -899,7 +919,8 @@ document.getElementById('go').onclick=async()=>{try{
         fleet = fleet.map((a) => (alerts[a.name] ? { ...a, alert: alerts[a.name].map((x) => x.what).join(', '), since: alerts[a.name][0].since } : a));
         // also listed on their own: a project whose status timed out still has its alert seen
         const list = Object.entries(alerts).flatMap(([project, xs]) => xs.map((x) => ({ project, ...x })));
-        return json(res, 200, { generated: new Date().toISOString(), fleet, alerts: list, plan: glancePlan(), events: glanceEvents(5) });
+        return glanceBrief((brief) => json(res, 200, {
+          generated: new Date().toISOString(), fleet, alerts: list, brief, plan: glancePlan(), events: glanceEvents(5) }));
       });
     }
 

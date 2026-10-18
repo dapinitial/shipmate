@@ -29,6 +29,7 @@ phrase_strip_confirm() {
 }
 
 # phrase_verb <normalized-no-confirm> — one of:
+#   brief   — "good morning", "briefing", "brief me", "what did I miss", "catch me up"
 #   status  — "status", "any update", "how's it going", "progress"
 #   result  — "result …", "read job …", "what happened …"
 #   stop    — "stop/cancel/kill …"
@@ -40,6 +41,8 @@ phrase_strip_confirm() {
 phrase_verb() {
   local p="${1:-}"
   case "$p" in
+    good\ morning*|morning\ briefing*|morning\ brief|briefing|briefing\ *|brief\ me*|the\ briefing*|daily\ briefing*|what\ did\ i\ miss*|catch\ me\ up*|what\ happened\ overnight*|what\ happened\ while\ i*)
+      echo brief; return ;;
     status|status\ *|any\ update*|how\ is\ it\ going*|how\'s\ it\ going*|progress|progress\ *)
       echo status; return ;;
     result|result\ *|results|results\ *|read\ job*|what\ happened*)

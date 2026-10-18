@@ -52,6 +52,16 @@ ok "stopword not stop"   "$(phrase_verb 'deploy the stopwatch app')"            
 ok "log verb"            "$(phrase_verb 'log crossed into utah')"                     log
 ok "captain's log"       "$(phrase_verb "captain's log the dish held")"               log
 ok "log to project"      "$(phrase_verb 'log to shotgun detour sunset at moab')"      log
+ok "good morning"        "$(phrase_verb 'good morning')"                              brief
+ok "good morning shipmate" "$(phrase_verb 'good morning shipmate')"                   brief
+ok "briefing"            "$(phrase_verb 'briefing')"                                  brief
+ok "morning briefing"    "$(phrase_verb 'morning briefing please')"                   brief
+ok "brief me"            "$(phrase_verb 'brief me')"                                  brief
+ok "what did i miss"     "$(phrase_verb 'what did i miss')"                           brief
+ok "catch me up"         "$(phrase_verb 'catch me up')"                               brief
+ok "what happened overnight beats result" "$(phrase_verb 'what happened overnight')" brief
+ok "what happened with job 2 is still result" "$(phrase_verb 'what happened with job 2')" result
+ok "a briefing for the team is not the briefing" "$(phrase_verb 'write a briefing for the team')" say
 ok "doctor"              "$(phrase_verb 'doctor')"                                    doctor
 ok "preflight"           "$(phrase_verb 'preflight')"                                 doctor
 ok "health check"        "$(phrase_verb 'health check')"                              doctor
