@@ -5,9 +5,11 @@ DigitalOcean, Vercel, and (soon) anywhere — you pick the destination, shipmate
 the host, the DNS, and the certificate. One command instead of an afternoon of dashboard clicking.
 
 > It's a [Claude Code](https://claude.ai/code) skill — say *"deploy this"* and it runs the whole
-> dance — and it's **voice**: *"Hey Siri, shipmate — deploy panogram… ship it"* from CarPlay, or a
-> continuous conversation in the Claude app (via [MCP](mcp/)) while background agents build,
-> test, and wait for your go.
+> dance — and it's **voice**: *"Hey Siri, shipmate — deploy panogram… ship it"* from CarPlay, a
+> continuous conversation in the Claude app (via [MCP](mcp/)), or a question asked into a pair of
+> Even G2 glasses ([glasses/](glasses/)) — while background agents build, test, and wait for your
+> go. And it speaks first: it watches every live site, briefs you at 7:30, and remembers across
+> channels. None of that adds a way to ship.
 
 ## Why
 
@@ -41,7 +43,12 @@ where you can hand agents your infrastructure and sleep.
   **zero new authority**.
 - **Tests where bugs are catastrophic.** The env secret-classifier and the parser that
   decides plan-vs-execute are the two places a bug ships a plaintext secret or executes a
-  misheard command; both have suites (`tests/`).
+  misheard command; both have suites, and so do the gate, the guard, the sign-in, the ledger,
+  the sentinel, the briefing, memory and the glasses (`tests/`, `glasses/test/`).
+- **Count what it let through.** Every gate decision — allowed ones included — is one line in
+  an append-only ledger. Facts only; whether a refusal mattered is a human note, never inferred.
+- **The cheapest gesture gets the least authority.** The glasses and the R1 ring can watch and
+  ask, never ship; approvals stay on the phone, where the plan is on the screen.
 - **Deliberation is a toggle, not a lifestyle.** `counsel off` (default): the single default
   Anthropic model answers — fast, and frankly the best. `counsel on`: questions fan out to a
   multi-model panel in parallel and a chair synthesizes, *required to name the dissent*.
@@ -51,7 +58,9 @@ where you can hand agents your infrastructure and sleep.
 
 ## What it does today
 
-- **Deploys** the current project to **DigitalOcean App Platform** (GitHub deploy-on-push).
+- **Deploys** the current project to **DigitalOcean App Platform** or **Vercel** (GitHub
+  deploy-on-push), behind one set of lifecycle verbs — status, url, phase, check, rollback,
+  roll-forward — so the gate, the checks and the ledger behave the same on both.
 - Generates the right `.do/app.yaml` for your stack (Next.js, Astro SSR, …) with **no secrets in
   the repo**.
 - Prints the exact DNS record to map your subdomain — or, when your DNS is hosted on the provider,
@@ -65,6 +74,20 @@ where you can hand agents your infrastructure and sleep.
   "yeah". *"Roll back panogram, confirm"* reverts a bad deploy with no model in the loop.
 - **Deliberates on demand**: `counsel on` convenes a multi-model panel that must report its
   dissent; off (default), the single best Anthropic model answers.
+- **Guards every push, from anyone**: a pre-push hook per clone refuses the wrong remote, a
+  protected path, or a change bigger than the project's cap (generated build output doesn't count);
+  a preflight runs before any execute; a live check reports when the commit is actually serving.
+  An override must name the rule it skips, and lands in the ledger.
+- **Signs you in properly**: the Claude-app connector uses OAuth 2.1 (PKCE, two scopes, rotating
+  refresh tokens) with a passkey or an authenticator app.
+- **Speaks first**: a sentinel checks every live site every five minutes (down, failed deploy,
+  expiring cert) and pushes once when a problem starts and once when it ends; a deterministic
+  briefing arrives at 7:30 (*"good morning"* asks for it any time); *"remember…"*, *"remind me
+  to…"* and *"where did we leave off?"* work across Siri, the Claude app and the terminal —
+  memory is notes for the model, never permissions.
+- **Fits on your face**: a read-only glance on Even G2 glasses (fleet, briefing, plan, gate), and
+  press-and-hold — on a temple or the R1 ring — to ask; speech is transcribed on your own machine
+  with whisper.cpp and never kept.
 
 ## Install
 
@@ -75,15 +98,17 @@ cd shipmate && ./install.sh        # links the skills into ~/.claude/skills
 
 Then in Claude Code, from any project: **`/deploy`**.
 
-Requires [`doctl`](https://docs.digitalocean.com/reference/doctl/) (DigitalOcean),
-[`gh`](https://cli.github.com/), and a Claude Code session.
+Requires [`doctl`](https://docs.digitalocean.com/reference/doctl/) (DigitalOcean) and/or the
+[`vercel`](https://vercel.com/docs/cli) CLI, [`gh`](https://cli.github.com/), and a Claude Code
+session. Optional: Tailscale (voice + the Claude app), ntfy (pushes), whisper.cpp (talking on the
+glasses). `bash skills/deploy/bin/doctor.sh` reports what's set up.
 
 ## Choose your destiny
 
 | Provider | Status | Notes |
 |---|---|---|
 | DigitalOcean App Platform | ✅ live | ~$5/mo flat · commercial-OK · you size scaling |
-| Vercel | ✅ beta | free Hobby (non-commercial) / $20 Pro · best Next.js DX · auto-scales |
+| Vercel | ✅ live | free Hobby (non-commercial) / $20 Pro · best Next.js DX · auto-scales |
 | Cloudflare / Render / Fly.io | 💭 wishlist | |
 
 `/deploy` detects the target (`.do/app.yaml` → DO, `.vercel/` → Vercel) or asks you inline.
@@ -101,6 +126,10 @@ The per-provider details and the full DNS story live in **[docs/PROVIDERS.md](do
 - [x] **MCP server** — the engine as agent-callable tools (plan/execute/status/jobs) with the
       plan→confirm gate enforced in code; drivable from the Claude iOS app's **voice mode** as a
       custom connector, with a tailnet-only **device onboarding page**. See **[mcp/](mcp/)**.
+- [x] **OAuth 2.1 sign-in**, the **decision ledger**, **Vercel at parity** behind the same gate.
+- [x] **It speaks first** — the sentinel, the 7:30 briefing, memory across channels, and
+      questions through Even G2 glasses + the R1 ring (simulator-verified; hardware next).
+- [ ] **Always-on host**, one-tap rollback from the sentinel — queued in the roadmap.
 - [ ] **MCP ecosystem** — providers ship their *own* agent-callable skills (Cloudflare, Stripe,
       GitHub already do); shipmate becomes the orchestration + safety layer that composes them.
 
@@ -108,8 +137,10 @@ Full thinking in **[docs/ROADMAP.md](docs/ROADMAP.md)**.
 
 ## Status
 
-Early, and dogfooded on the author's own fleet. The honest test: if running `/deploy` daily feels
-like magic, the bigger thing is real.
+Early, and dogfooded on the author's own fleet since July (eight live sites today). The honest gaps:
+the host is still a laptop, the glasses and ring are verified in the simulator rather than on the
+hardware, and Siri dictation remains the weakest link — which is why nothing executes on a single
+sentence. The full story, numbers included: [unakin.com/case-studies/shipmate](https://www.unakin.com/case-studies/shipmate).
 
 ## License
 

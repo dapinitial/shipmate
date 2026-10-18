@@ -12,7 +12,9 @@ providers ship their own agent-callable skills and shipmate composes them.
 
 ## Phase 2 — Choose your destiny (multi-provider)
 - [x] `/deploy` asks (or detects) the target: **DigitalOcean** or **Vercel**.
-- [x] Vercel path: `vercel` CLI / API, env sync, preview deploys. (beta)
+- [x] Vercel path: `vercel` CLI / API, env sync. **At parity since 2026-10-14**: the same lifecycle
+      verbs (`bin/app.sh`), gate, preflight, guard, live check, rollback/roll-forward and ledger.
+      Preview deploys stay Vercel's own.
 - [ ] **DNS automation** — when the domain is on provider DNS, create subdomain + cert hands-off.
 - [ ] One-time **DNS migration helper** (registrar → DO/Cloudflare) with a record-replication
       checklist so nothing breaks.
@@ -34,11 +36,11 @@ The industry is heading toward providers exposing agent-callable tools (**MCP** 
 Model Context Protocol; Cloudflare, Stripe, GitHub already ship servers).
 - [x] **shipmate as an MCP server** (v0, stdio): plan/execute/status/jobs as tools, with the
       plan→confirm gate enforced in code (single-use, 10-minute grant). See [mcp/](../mcp/).
-- [x] Streamable HTTP transport (`--http` + Tailscale Funnel, token-in-path auth) → registered
-      as a claude.ai custom connector. **Confirmed 2026-07: the Claude iOS app's voice mode
-      can call the tools** — continuous voice conversation with plan→execute gating is real.
-      (Hardening next: LaunchAgent so the server survives reboots; OAuth instead of the
-      bearer URL.)
+- [x] Streamable HTTP transport (`--http` + Tailscale Funnel) → registered as a claude.ai
+      custom connector. **Confirmed 2026-07: the Claude iOS app's voice mode can call the
+      tools** — continuous voice conversation with plan→execute gating is real. LaunchAgents keep
+      the servers up (2026-07); **OAuth 2.1** with a passkey or authenticator app replaced the
+      token-in-path URL, which was revoked (2026-10-14).
 - [ ] Compose provider MCP servers instead of bespoke CLI glue.
 - [ ] Invite registrars/hosts (NameSilo, Bluehost, Porkbun, DO, Cloudflare…) to publish skills;
       shipmate becomes the orchestration + safety layer on top, not the integration grind.

@@ -133,8 +133,12 @@ The fix is *where DNS lives*, not "automate the registrar."
   Configuration (Site URL + `https://<domain>/**`), or sign-in fails in prod.
 
 ## Lifecycle (after it's live)
-- DO: `bin/do-app.sh <status|url|logs|redeploy|rollback|destroy> <project-dir>`. `rollback` reverts
-  to the previous successful deployment via the DO API; `rollback` and `destroy` need `--yes`.
+- Either host: `bin/app.sh <status|url|phase <sha>|check|rollback|roll-forward> <project-dir>` picks
+  the adapter (`do-app.sh` / `vercel-app.sh`); phases are normalized (`LIVE`, `FAILED`, …).
+  `rollback` / `roll-forward` only describe without `--yes`. After a Vercel rollback, new pushes are
+  held until a roll-forward — say so every time.
+- DO only: `bin/do-app.sh <logs|redeploy|destroy> <project-dir>`; `destroy` needs `--yes` and is
+  never run from voice.
 
 ## After
 - Pushes to `main` auto-redeploy (DO `deploy_on_push` / Vercel git integration).

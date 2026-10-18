@@ -11,8 +11,9 @@ bash skills/deploy/bin/doctor.sh            # check your tools + auth
 ```
 
 ## Before every commit
-- Every `tests/test_*.sh` — **green** (the env classifier and the voice phrase parser both
-  guard against shipping the wrong thing).
+- Every `tests/test_*.sh` — **green** (the env classifier and the voice phrase parser guard
+  against shipping the wrong thing; the gate, guardrails, sign-in, ledger, providers, sentinel,
+  briefing, memory and talk suites guard everything around them) — and `npm test` in `glasses/`.
 - `bash skills/deploy/bin/doctor.sh` — sane on your machine.
 - No secret value in any committed file (the pre-commit hook enforces it).
 - No hardcoded usernames/refs — derive from context (`gh`/git remote, `.env.local`, `.shiprc`).
@@ -37,7 +38,7 @@ A provider is a set of `skills/deploy/bin/<provider>-*.sh` helpers implementing 
 |---|---|---|
 | **provision** | create/update the app + inject env **safely** | `do-provision.sh`, `vercel-provision.sh` |
 | **url** | print the live URL | `do-app.sh url` |
-| **lifecycle** | status / logs / redeploy / destroy (destroy gated by `--yes`) | `do-app.sh` |
+| **lifecycle** | status · url · phase · check · rollback · roll-forward (writes gated by `--yes`), dispatched by `app.sh` | `do-app.sh`, `vercel-app.sh` |
 | **auth/allowlist** | wire the app's backing services (e.g. Supabase redirect URLs) | `supabase-allowlist.sh` |
 
 Then add a path to `skills/deploy/SKILL.md` and a row to `docs/PROVIDERS.md`. Reuse `lib/envspec.sh`

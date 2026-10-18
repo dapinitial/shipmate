@@ -14,7 +14,7 @@ stops.
 - **Secrets:** never in the committed spec. Public build-time vars can be inline; secrets go in the
   DO dashboard as **Encrypted** env vars.
 
-## Vercel — 🛠 planned
+## Vercel — ✅ live (behind the same gate as DigitalOcean)
 
 - **Cost:** **Hobby is free but non-commercial only.** A funded/commercial product must use **Pro
   ($20/mo)** + bandwidth.
