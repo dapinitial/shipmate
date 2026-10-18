@@ -3,6 +3,9 @@
 #
 # Usage: ledger.sh report [--since YYYY-MM-DD] [--project NAME]
 #            counts per policy and outcome, then every non-routine decision with its id
+#        ledger.sh report --dictation [--since YYYY-MM-DD]
+#            what Siri said when no project could be placed, most frequent first —
+#            the evidence behind every alias worth adding to ~/.shipmate/aliases
 #        ledger.sh show <id>        one decision with its notes
 #        ledger.sh annotate <id> "<assessment>"
 #            add a human note to a decision: the plausible consequence, judged honestly
@@ -51,6 +54,27 @@ since = project = None
 for i, a in enumerate(args):
     if a == "--since": since = args[i + 1]
     if a == "--project": project = args[i + 1]
+if "--dictation" in args:
+    # What Siri actually handed the parser when it could not place a project. These are the
+    # only honest source for a dictation alias: a word you were misheard saying, counted.
+    miss = [r for r in recs if r["policy"] == "phrase-parser"
+            and r["outcome"] in ("unresolved", "ambiguous")
+            and (not since or r["ts"] >= since)]
+    if not miss:
+        print("No dictation misses recorded. Nothing to add to the dictionary."); sys.exit(0)
+    heard = {}
+    for r in miss:
+        key = (r["attempted"].strip().lower(), r["outcome"], r.get("detail", ""))
+        heard[key] = heard.get(key, 0) + 1
+    print(f"{len(miss)} phrase(s) that named no project{' since ' + since if since else ''}, "
+          f"{len(heard)} distinct:\n")
+    print(f'  {"heard":<44}{"outcome":<12}times')
+    for (ph, out, det), n in sorted(heard.items(), key=lambda kv: (-kv[1], kv[0][0])):
+        print(f'  {ph[:42]:<44}{out:<12}{n}')
+        if out == "ambiguous" and det: print(f'      {det}')
+    print("\nAdd the ones you recognise to ~/.shipmate/aliases as  what-you-heard|project-dir")
+    print("(a word that merely SOUNDS like a project no longer needs one — these are the rest).")
+    sys.exit(0)
 sel = [r for r in recs if (not since or r["ts"] >= since) and (not project or r["project"] == project)]
 print(f"{len(sel)} decision(s){' since ' + since if since else ''}{' for ' + project if project else ''}\n")
 counts = {}

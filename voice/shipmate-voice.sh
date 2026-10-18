@@ -143,6 +143,28 @@ project_or_default() {
   printf '%s' "${SHIPMATE_PROJECT_DIR:-$SITES_ROOT}"
 }
 
+# project_for <normalized phrase> — the project a phrase names, else the session's, else the
+# fleet root. Two kinds of miss go on the record, because they are the raw material for the
+# dictation dictionary (bin/ledger.sh report --dictation): a name that sounds like more than
+# one project, and — only when there is no session project to fall back on, so the phrase
+# really did fail to place anything — a name that matched nothing at all. Aliases then get
+# written from evidence instead of from memory.
+project_for() {
+  local phrase="${1:-}" why sess=""
+  why="$(resolve_project_why "$phrase")"
+  case "$why" in
+    exact\|*|phonetic\|*) printf '%s' "${why#*|}"; return 0 ;;
+    ambiguous\|*) ledger_record phrase-parser ambiguous '-' "$phrase" "sounds like ${why#*|}; resolved nothing" >/dev/null ;;
+  esac
+  if [ -f "$STATE_DIR/session.project" ]; then sess="$(cat "$STATE_DIR/session.project")"; fi
+  if [ -n "$sess" ] && [ -d "$sess" ]; then printf '%s' "$sess"; return 0; fi
+  case "$why" in
+    ambiguous\|*) ;;
+    *) [ -n "$phrase" ] && ledger_record phrase-parser unresolved '-' "$phrase" "no project matched by name or sound" >/dev/null ;;
+  esac
+  printf '%s' "${SHIPMATE_PROJECT_DIR:-$SITES_ROOT}"
+}
+
 # ---- conversational turn (synchronous) --------------------------------------------------
 
 turn() { # <phrase> <mode:plan|execute> <project dir>
@@ -714,22 +736,22 @@ case "${1:-}" in
     if [ "$MODE" != "plan" ] && [ "$MODE" != "execute" ]; then
       speak "usage: --turn <plan|execute> <project|-> <request…>"; exit 1
     fi
-    PROJ="$(project_or_default "$(resolve_project "$(phrase_normalize "$3")")")"
+    PROJ="$(project_for "$(phrase_normalize "$3")")"
     shift 3; turn "$*" "$MODE" "$PROJ"; exit $? ;;
   --dispatch)
-    PROJ="$(project_or_default "$(resolve_project "$(phrase_normalize "$2")")")"
+    PROJ="$(project_for "$(phrase_normalize "$2")")"
     shift 2; dispatch_job "$*" "$PROJ"; exit 0 ;;
   --status-report) verb_status; exit 0 ;;
   --result)        verb_result "job ${2:-}"; exit 0 ;;
   --stop)          verb_stop "job ${2:-}"; exit 0 ;;
   --counsel)
-    PROJ="$(project_or_default "$(resolve_project "$(phrase_normalize "$2")")")"
+    PROJ="$(project_for "$(phrase_normalize "$2")")"
     shift 2; counsel "$*" "$PROJ"; exit $? ;;
   --counsel-set)
     case "${2:-}" in on|off) counsel_toggle "$2"; exit 0 ;; esac
     speak "usage: --counsel-set <on|off>"; exit 1 ;;
   --rollback)
-    PROJ="$(project_or_default "$(resolve_project "$(phrase_normalize "${2:-}")")")"
+    PROJ="$(project_for "$(phrase_normalize "${2:-}")")"
     MODE="plan"; DIRN="back"
     for a in "${@:3}"; do case "$a" in --yes) MODE="execute" ;; --forward) DIRN="forward" ;; esac; done
     verb_rollback "$PROJ" "$MODE" "$DIRN"; exit $? ;;
@@ -785,9 +807,9 @@ case "$VERB" in
   counsel_off) counsel_toggle off ;;
   doctor)   verb_doctor ;;
   log)      verb_log "$(phrase_log_body "$CLEAN")" "$MODE" ;;
-  rollback) verb_rollback "$(project_or_default "$(resolve_project "$CLEAN")")" "$MODE" ;;
-  rollforward) verb_rollback "$(project_or_default "$(resolve_project "$CLEAN")")" "$MODE" forward ;;
-  counsel) run_or_queue counsel "$MODE" "$(project_or_default "$(resolve_project "$CLEAN")")" "$(phrase_counsel_question "$CLEAN")" ;;
-  job)    run_or_queue job "$MODE" "$(project_or_default "$(resolve_project "$CLEAN")")" "$(phrase_task "$CLEAN")" ;;
-  say)    run_or_queue say "$MODE" "$(project_or_default "$(resolve_project "$CLEAN")")" "$CLEAN" ;;
+  rollback) verb_rollback "$(project_for "$CLEAN")" "$MODE" ;;
+  rollforward) verb_rollback "$(project_for "$CLEAN")" "$MODE" forward ;;
+  counsel) run_or_queue counsel "$MODE" "$(project_for "$CLEAN")" "$(phrase_counsel_question "$CLEAN")" ;;
+  job)    run_or_queue job "$MODE" "$(project_for "$CLEAN")" "$(phrase_task "$CLEAN")" ;;
+  say)    run_or_queue say "$MODE" "$(project_for "$CLEAN")" "$CLEAN" ;;
 esac

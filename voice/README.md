@@ -42,10 +42,24 @@ by hand. Setup in **[apple-shortcut.md](apple-shortcut.md)**.
 | *"new session"* / *"start over"* | Forgets the current conversation. |
 
 Projects are matched by name against `~/Sites` (configurable). Follow-ups that don't name a
-project stay with the one you're already talking about. Dictation mangles names, so
-`~/.shipmate/aliases` maps what Siri hears to a directory, one `alias|dir` per line
-(`anakin|unakin`, `portfolio|davidpuerto.com-portfolio`); keys match ignoring case, spaces and
-punctuation.
+project stay with the one you're already talking about.
+
+Dictation mangles names, so a project resolves three ways, in order. An exact directory name
+wins; then `~/.shipmate/aliases`, which maps what Siri hears to a directory, one `alias|dir`
+per line (`portfolio|davidpuerto.com-portfolio`), matched ignoring case, spaces and
+punctuation; then **how the word sounds** — every name is reduced to a consonant skeleton, so
+"anakin" finds `unakin` with no alias written anywhere. When two projects sound alike nothing
+resolves, because an ambiguous name is where a guess costs the most.
+
+You should rarely need to write an alias now, and never have to guess which one: every phrase
+that failed to place a project is on the record, so
+
+```bash
+bash skills/deploy/bin/ledger.sh report --dictation
+```
+
+lists what Siri actually said, most frequent first. Add the ones you recognise — the rest were
+already caught by sound.
 
 ## Built for the road
 

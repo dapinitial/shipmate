@@ -122,7 +122,13 @@ phrase_route() {
 #      line, target relative to $SITES_ROOT or absolute, "#" comments. Alias keys are compared
 #      lowercase with spaces and punctuation removed, so "you know kin|unakin" catches the
 #      dictation "you know kin". An alias whose target directory is missing is ignored.
+#   3. failing both, how the word SOUNDS: every project name and every dictated word is reduced
+#      to a consonant skeleton (phrase_phonetic_key), so "anakin" finds unakin without anyone
+#      having written that alias down. Exact always beats sound, and when two projects sound
+#      the same nothing resolves — an ambiguous name is where a guess costs the most.
 # Returns the resolved directory (no trailing slash) or empty when the phrase names nothing.
+# resolve_project_why() reports WHICH of the three answered, for callers that want to read the
+# project back before acting, or record the miss.
 phrase_alias_key() { printf '%s' "${1:-}" | tr '[:upper:]' '[:lower:]' | tr -cd 'a-z0-9'; }
 
 resolve_alias() { # <key> — directory for an alias key, else empty
@@ -138,7 +144,7 @@ resolve_alias() { # <key> — directory for an alias key, else empty
   done < "$f"
 }
 
-resolve_project() { # <normalized phrase>
+_resolve_exact() { # <normalized phrase> — pass 1: aliases and literal directory names
   local root="${SITES_ROOT:-$HOME/Sites}" w prev="" prev2="" d base hit
   for w in $1; do
     # An alias is the owner's explicit intent, so it beats a folder of the same name
@@ -158,5 +164,84 @@ resolve_project() { # <normalized phrase>
     prev2="$prev"; prev="$w"
   done
   printf ''
+}
+
+# phrase_phonetic_key <word> — a word's consonant skeleton, so words that SOUND alike collapse
+# to one key: "unakin", "anakin" and "unnakin" are all NKN. Soundex-style classes, with the two
+# rules that matter — a doubled consonant codes once ("anna" → N), and a vowel between two
+# same-class consonants separates them ("nan" → NN) while h, w and y do not.
+# Pure awk, using substr rather than split($0,a,"") so it runs on BSD awk / macOS bash 3.2.
+phrase_phonetic_key() {
+  printf '%s' "${1:-}" | tr '[:upper:]' '[:lower:]' | tr -cd 'a-z' | awk '{
+    out = ""; last = ""
+    for (i = 1; i <= length($0); i++) {
+      ch = substr($0, i, 1); k = ""
+      if (ch ~ /^[bpfv]$/)          k = "B"
+      else if (ch ~ /^[cgjkqsxz]$/) k = "K"
+      else if (ch ~ /^[dt]$/)       k = "T"
+      else if (ch == "l")           k = "L"
+      else if (ch ~ /^[mn]$/)       k = "N"
+      else if (ch == "r")           k = "R"
+      if (k != "") { if (k != last) out = out k; last = k }
+      else if (ch ~ /^[aeiou]$/) last = ""
+    }
+    print out
+  }'
+}
+
+# Keys shorter than this may not match a project: one- and two-class keys are the filler of
+# ordinary speech ("on" → N, "it" → T, "the" → T) and would match far too much.
+PHONETIC_MIN_KEY=3
+
+_resolve_phonetic() { # <normalized phrase> → "<dir>", or "?|<name>,<name>" when it is ambiguous
+  local root="${SITES_ROOT:-$HOME/Sites}" w prev="" key d base hit names n
+  for w in $1 ''; do
+    if [ -z "$prev" ]; then prev="$w"; continue; fi
+    # the word alone, then joined to the one before it ("shotgun detour" → shotgundetour)
+    for key in "$(phrase_phonetic_key "$prev")" "$(phrase_phonetic_key "$prev$w")"; do
+      [ "${#key}" -ge "$PHONETIC_MIN_KEY" ] || continue
+      hit=''; names=''; n=0
+      for d in "$root"/*/; do
+        [ -d "$d" ] || continue
+        base="$(basename "$d")"
+        [ "$(phrase_phonetic_key "$base")" = "$key" ] || continue
+        n=$((n + 1)); hit="${d%/}"; names="${names:+$names,}$base"
+      done
+      [ "$n" -eq 1 ] && { printf '%s' "$hit"; return 0; }
+      # Two projects that sound alike is exactly when guessing costs most: say so instead.
+      [ "$n" -gt 1 ] && { printf '?|%s' "$names"; return 0; }
+    done
+    prev="$w"
+  done
+  printf ''
+}
+
+# resolve_project_why <normalized phrase> — how the phrase resolved, for callers that want to
+# read the project back or record a miss:
+#   exact|<dir>      an alias or a literal directory name
+#   phonetic|<dir>   it only SOUNDED like that project — a plan turn should say which one
+#   ambiguous|<a,b>  more than one project sounds like it: resolve nothing, ask
+#   (empty)          the phrase names no project we know
+resolve_project_why() {
+  local hit
+  hit="$(_resolve_exact "$1")"
+  [ -n "$hit" ] && { printf 'exact|%s' "$hit"; return 0; }
+  hit="$(_resolve_phonetic "$1")"
+  case "$hit" in
+    '')    printf '' ;;
+    '?|'*) printf 'ambiguous|%s' "${hit#?|}" ;;
+    *)     printf 'phonetic|%s' "$hit" ;;
+  esac
+}
+
+# resolve_project <normalized phrase> — the resolved directory, or empty. An exact match always
+# beats one that merely sounds right, and an ambiguous sound resolves to nothing, never a guess.
+resolve_project() {
+  local why
+  why="$(resolve_project_why "$1")"
+  case "$why" in
+    exact\|*|phonetic\|*) printf '%s' "${why#*|}" ;;
+    *) printf '' ;;
+  esac
 }
 

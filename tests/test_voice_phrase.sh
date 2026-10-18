@@ -113,7 +113,33 @@ ok "alias absolute target"  "$(resolve_project 'abs status')"                   
 ok "alias to missing dir"   "$(resolve_project 'deploy ghost')"                  ""
 ok "no project named"       "$(resolve_project 'on the whole deploy it')"        ""
 ok "alias beats same-name folder" "$(resolve_project 'in client change the button')" "$TMP/sites/client/client-app"
-ok "no aliases file"        "$(SHIPMATE_ALIASES=/nonexistent resolve_project 'in anakin')" ""
+ok "why: exact is reported"  "$(resolve_project_why 'deploy unakin')"             "exact|$TMP/sites/unakin"
+
+echo "phonetic keys (words that sound alike share one key):"
+ok "unakin"            "$(phrase_phonetic_key 'unakin')"        NKN
+ok "anakin matches it" "$(phrase_phonetic_key 'anakin')"        NKN
+ok "doubled consonant" "$(phrase_phonetic_key 'unnakin')"       NKN
+ok "case and hyphens"  "$(phrase_phonetic_key 'Port-Folio')"    BRTBL
+ok "vowel breaks a run" "$(phrase_phonetic_key 'nan')"          NN
+ok "no vowel does not"  "$(phrase_phonetic_key 'anna')"         N
+ok "filler word is short" "$(phrase_phonetic_key 'it')"         T
+ok "empty stays empty"  "$(phrase_phonetic_key '')"             ""
+
+echo "phonetic resolution (no alias needed — this is the anakin fix):"
+# The alias file is the OLD fix for this; with it gone, the sound alone has to be enough.
+ok "mishearing resolves"    "$(SHIPMATE_ALIASES=/nonexistent resolve_project 'in anakin')"      "$TMP/sites/unakin"
+ok "…and says it was sound" "$(SHIPMATE_ALIASES=/nonexistent resolve_project_why 'in anakin')" "phonetic|$TMP/sites/unakin"
+ok "exact still beats it"   "$(SHIPMATE_ALIASES=/nonexistent resolve_project_why 'deploy unakin')" "exact|$TMP/sites/unakin"
+ok "filler words match nothing" "$(SHIPMATE_ALIASES=/nonexistent resolve_project 'on the whole deploy it')" ""
+ok "unknown word stays unknown" "$(SHIPMATE_ALIASES=/nonexistent resolve_project 'deploy hovercraft')" ""
+# Two projects that sound the same is when a guess costs most: resolve nothing, name both.
+mkdir -p "$TMP/sites/panogram" "$TMP/sites/panagram"
+ok "a real name still wins"  "$(SHIPMATE_ALIASES=/nonexistent resolve_project 'deploy panogram')" "$TMP/sites/panogram"
+ok "sound-alike projects are ambiguous" "$(SHIPMATE_ALIASES=/nonexistent resolve_project 'deploy panigram')" ""
+ok "…and both are named"    "$(SHIPMATE_ALIASES=/nonexistent resolve_project_why 'deploy panigram')" "ambiguous|panagram,panogram"
+ok "an alias disambiguates" "$(printf '%s\n' 'panigram|panogram' > "$TMP/al2"; SHIPMATE_ALIASES="$TMP/al2" resolve_project 'deploy panigram')" "$TMP/sites/panogram"
+rmdir "$TMP/sites/panagram" "$TMP/sites/panogram"
+ok "no aliases file, no sound" "$(SHIPMATE_ALIASES=/nonexistent resolve_project 'in zzz')" ""
 rm -rf "$TMP"; unset SITES_ROOT SHIPMATE_ALIASES
 
 echo
