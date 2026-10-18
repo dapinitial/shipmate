@@ -103,6 +103,19 @@ phrase_memory_alias() {
     -e 's/^(.+) means (.+)$/\1|\2/p' | head -1 | sed -E "s/'//g; s/\|the /|/"
 }
 
+# phrase_readonly_refusal <verb> <mode> — for a read-only channel (the glasses), why this phrase
+# can't run there, or nothing when it can. Read-only means what the shipmate:read scope means
+# everywhere else: ask, brief, recall, plan — never ship, never write memory, never start work.
+phrase_readonly_refusal() {
+  [ "${2:-}" = execute ] && { echo ship; return; }
+  case "${1:-}" in
+    remember|remind|forget|done) echo memory ;;
+    log) echo log ;;
+    job|stop) echo job ;;
+    counsel_on|counsel_off) echo setting ;;
+  esac
+}
+
 # phrase_counsel_question <normalized> — the question minus its counsel trigger words:
 # "counsel on whether we should move to vercel" → "whether we should move to vercel".
 phrase_counsel_question() {

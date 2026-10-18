@@ -2,7 +2,7 @@
 // contract, so every line it can emit is checked against the G2's limits.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { LINE_CHARS, MAX_LINES, ago, nextView, render, says, type Glance } from '../src/view.ts';
+import { LINE_CHARS, MAX_LINES, ago, answerPages, nextView, render, renderTalk, says, wrap, type Glance } from '../src/view.ts';
 
 const now = new Date('2026-10-14T12:00:00Z');
 const g = (over: Partial<Glance> = {}): Glance => ({
@@ -118,4 +118,27 @@ test('views cycle both ways', () => {
   assert.equal(nextView('brief', 1), 'plan');
   assert.equal(nextView('events', 1), 'fleet');
   assert.equal(nextView('fleet', -1), 'events');
+});
+
+test('wrap: words to the line width, long words cut', () => {
+  assert.deepEqual(wrap('the quick brown fox', 9), ['the quick', 'brown fox']);
+  assert.deepEqual(wrap('a\n\nb', 9), ['a', 'b']);
+  assert.equal(wrap('x'.repeat(60))[0].length, LINE_CHARS);
+});
+
+test('talking: listening, thinking, errors, and paged answers all fit', () => {
+  fits(renderTalk({ state: 'listening', seconds: 3 }));
+  assert.match(renderTalk({ state: 'listening', seconds: 3 }), /LISTENING[\s\S]*3s/);
+  fits(renderTalk({ state: 'thinking', heard: 'what did i miss '.repeat(10) }));
+  fits(renderTalk({ state: 'error', message: 'Speech isn\'t set up on the host: brew install whisper-cpp, then put ggml-base.en.bin in ~/.shipmate/whisper (see glasses/README.md).' }));
+  const answer = 'Since yesterday at 9 PM: '.padEnd(60, '.') + ' ' + Array.from({ length: 40 }, (_, i) => `word${i}`).join(' ');
+  const pages = answerPages(answer);
+  assert.ok(pages > 1);
+  const first = renderTalk({ state: 'answer', heard: 'good morning', answer, page: 0 });
+  assert.match(first, new RegExp(`^SHIPMATE · ANSWER 1/${pages}\n> good morning\n`));
+  fits(first);
+  const last = renderTalk({ state: 'answer', heard: 'good morning', answer, page: 99 }); // clamped
+  assert.match(last, new RegExp(`ANSWER ${pages}/${pages}`));
+  fits(last);
+  assert.match(renderTalk({ state: 'answer', heard: 'status', answer: 'All quiet.', page: 0 }), /^SHIPMATE · ANSWER\n> status\nAll quiet\.$/);
 });

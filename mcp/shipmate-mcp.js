@@ -717,6 +717,60 @@ function glancePlan() {
   return ms > 0 ? { project: g.project, minutesLeft: left } : null;
 }
 
+// ---- talk on the glasses: speech → words → the bridge, read-only ------------------------------
+//
+// POST /glance/ask with a shipmate:read token. The body is either JSON {text} (typed on the
+// phone) or raw 16-bit mono PCM from the glasses' microphones, with ?ms=<how long it lasted>
+// (and ?rate= when the sender knows it). Speech becomes words on this machine with whisper.cpp
+// (SHIPMATE_WHISPER, SHIPMATE_WHISPER_MODEL): audio never leaves the host and is never kept. The
+// words run through the bridge as the "glasses" channel with SHIPMATE_READONLY=1, so they can ask,
+// brief, recall and plan, and nothing more — the same reach the read scope has everywhere else.
+
+const WHISPER_MODEL = process.env.SHIPMATE_WHISPER_MODEL || path.join(os.homedir(), '.shipmate', 'whisper', 'ggml-base.en.bin');
+const ASK_MAX_BYTES = 3 * 1024 * 1024; // ~30 s at 48 kHz; a question is a few seconds
+const askLog = new Map();              // client id → recent ask timestamps
+function whisperBin() {
+  if (process.env.SHIPMATE_WHISPER) return process.env.SHIPMATE_WHISPER;
+  for (const d of String(process.env.PATH || '').split(':').concat(['/opt/homebrew/bin', '/usr/local/bin'])) {
+    const f = path.join(d, 'whisper-cli'); if (d && fs.existsSync(f)) return f;
+  }
+  return '';
+}
+// The SDK doesn't document the frame rate; bytes over duration tells it, snapped to a real rate.
+function pcmRate(bytes, ms, given) {
+  if ([8000, 16000, 24000, 32000, 44100, 48000].includes(given)) return given;
+  const est = ms > 0 ? bytes / 2 / (ms / 1000) : 16000;
+  return [8000, 16000, 24000, 32000, 44100, 48000].reduce((a, b) => (Math.abs(b - est) < Math.abs(a - est) ? b : a));
+}
+function wavOf(pcm, rate) {
+  const h = Buffer.alloc(44);
+  h.write('RIFF', 0); h.writeUInt32LE(36 + pcm.length, 4); h.write('WAVE', 8); h.write('fmt ', 12);
+  h.writeUInt32LE(16, 16); h.writeUInt16LE(1, 20); h.writeUInt16LE(1, 22); h.writeUInt32LE(rate, 24);
+  h.writeUInt32LE(rate * 2, 28); h.writeUInt16LE(2, 32); h.writeUInt16LE(16, 34); h.write('data', 36); h.writeUInt32LE(pcm.length, 40);
+  return Buffer.concat([h, pcm]);
+}
+function transcribe(pcm, rate) {
+  return new Promise((resolve) => {
+    const bin = whisperBin();
+    if (!bin || !fs.existsSync(WHISPER_MODEL)) return resolve({ error: 'Speech isn\'t set up on the host: brew install whisper-cpp, then put ggml-base.en.bin in ~/.shipmate/whisper (see glasses/README.md).' });
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'shipmate-ask-')), wav = path.join(dir, 'ask.wav');
+    fs.writeFileSync(wav, wavOf(pcm, rate), { mode: 0o600 });
+    execFile(bin, ['-m', WHISPER_MODEL, '-f', wav, '-nt', '-np', '-l', 'en'], { timeout: 30000 }, (err, stdout) => {
+      fs.rmSync(dir, { recursive: true, force: true }); // the audio is never kept
+      if (err) return resolve({ error: 'I couldn\'t make out the audio (transcription failed).' });
+      const text = String(stdout || '').replace(/\[[A-Z_ ]+\]|\([^)]*\)/g, ' ').replace(/\s+/g, ' ').trim();
+      resolve({ text });
+    });
+  });
+}
+function askBridge(text) {
+  return new Promise((resolve) => {
+    execFile('bash', [BRIDGE, text], { timeout: 120000, maxBuffer: 1024 * 1024,
+      env: { ...process.env, SHIPMATE_CHANNEL: 'glasses', SHIPMATE_READONLY: '1', SHIPMATE_TURN_BUDGET: process.env.SHIPMATE_GLASSES_BUDGET || '20' } },
+      (err, stdout) => resolve(String(stdout || '').trim() || 'shipmate had nothing to say — check the Mac.'));
+  });
+}
+
 // ---- sign-in approval (reuses the tap-to-confirm channel) ----------------------------------
 
 const logins = new Map(); // pollId → { nonce, userCode, q, exp, passkey, challenge, access }
@@ -819,6 +873,18 @@ function readBody(req, limit) {
     req.on('data', (c) => { body += c; if (body.length > limit) req.destroy(); });
     req.on('end', () => resolve(body));
     req.on('error', () => resolve(''));
+  });
+}
+function readBytes(req, limit) { // → Buffer, or null when the body is over the limit
+  return new Promise((resolve) => {
+    if (Number(req.headers['content-length']) > limit) return resolve(null); // refused before reading
+    const parts = []; let n = 0, over = false;
+    req.on('data', (c) => { // past the limit: stop keeping it, answer now (the caller closes)
+      n += c.length;
+      if (n > limit) { if (!over) { over = true; parts.length = 0; resolve(null); } } else parts.push(c);
+    });
+    req.on('end', () => resolve(over ? null : Buffer.concat(parts)));
+    req.on('error', () => resolve(null));
   });
 }
 function parseForm(body, type) {
@@ -925,7 +991,7 @@ document.getElementById('go').onclick=async()=>{try{
     }
 
     // -- CORS for the bearer/code-authenticated endpoints a glasses app calls -----------------
-    if (['/glance', '/device/pair', '/token'].includes(p)) {
+    if (['/glance', '/glance/ask', '/device/pair', '/token'].includes(p)) {
       res.setHeader('Access-Control-Allow-Origin', '*');
       res.setHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type');
       res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
@@ -946,6 +1012,33 @@ document.getElementById('go').onclick=async()=>{try{
       const out = issueTokens(db, id, 'shipmate:read', resource);
       oauthSave(db); audit('device_paired', { client: id.slice(0, 8), name: e.name });
       return json(res, 200, { ...out, client_id: id, glance_url: `${base}/glance` });
+    }
+
+    // -- talk on the glasses: a question in, an answer out (read-only) ------------------------
+    if (p === '/glance/ask' && req.method === 'POST') {
+      const m = String(req.headers.authorization || '').match(/^Bearer\s+([A-Za-z0-9_-]{20,})$/);
+      const tok = m && oauthLoad().access[sha(m[1])];
+      if (!tok || tok.resource !== resource || !tok.scope.split(' ').includes('shipmate:read')) {
+        res.writeHead(401, { 'WWW-Authenticate': `Bearer realm="shipmate"${m ? ', error="invalid_token"' : ''}` }); return res.end();
+      }
+      const t = now(), recent = (askLog.get(tok.client_id) || []).filter((x) => x > t - 600);
+      if (recent.length >= 30) return json(res, 429, { error: 'Too many questions in ten minutes; give it a moment.' });
+      askLog.set(tok.client_id, [...recent, t]);
+      const body = await readBytes(req, ASK_MAX_BYTES);
+      if (!body) return json(res, 413, { error: 'That was too long; keep a question under 30 seconds.' }, { Connection: 'close' });
+      let heard = '';
+      if (/json/.test(req.headers['content-type'] || '')) {
+        try { heard = String(JSON.parse(body.toString('utf8')).text || ''); } catch {}
+      } else {
+        const q = u.searchParams, ms = Number(q.get('ms')) || 0;
+        if (body.length < 3200) return json(res, 400, { error: 'I didn\'t hear anything. Hold, speak, then let go.' });
+        const out = await transcribe(body.length % 2 ? body.subarray(0, body.length - 1) : body, pcmRate(body.length, ms, Number(q.get('rate'))));
+        if (out.error) return json(res, 503, { error: out.error });
+        heard = out.text;
+      }
+      heard = heard.replace(/\s+/g, ' ').trim().slice(0, 500);
+      if (!heard) return json(res, 400, { error: 'I didn\'t catch any words. Try again a little closer.' });
+      return json(res, 200, { heard, answer: await askBridge(heard) });
     }
 
     // -- the glance: read-only, compact, for heads-up displays --------------------------------

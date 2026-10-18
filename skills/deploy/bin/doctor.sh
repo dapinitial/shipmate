@@ -32,6 +32,14 @@ if [ "$TARGET" = vercel ] || [ "$TARGET" = all ]; then
   chk "vercel auth" "vercel whoami"     "vercel login"
 fi
 
+echo "speech (optional — only for talking on the glasses):"
+WMODEL="${SHIPMATE_WHISPER_MODEL:-$HOME/.shipmate/whisper/ggml-base.en.bin}"
+if command -v "${SHIPMATE_WHISPER:-whisper-cli}" >/dev/null 2>&1 && [ -s "$WMODEL" ]; then
+  printf '  \033[32m✓\033[0m whisper.cpp + model (speech stays on this machine)\n'; ok=$((ok+1))
+else
+  printf '  \033[33m•\033[0m whisper.cpp: brew install whisper-cpp, and ggml-base.en.bin in ~/.shipmate/whisper (glasses/README.md)\n'
+fi
+
 echo "secrets (optional — only for Supabase auth wiring):"
 if [ -n "${SUPABASE_ACCESS_TOKEN:-}" ]; then
   printf '  \033[32m✓\033[0m Supabase token (env)\n'; ok=$((ok+1))

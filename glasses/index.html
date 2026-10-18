@@ -35,7 +35,12 @@
   </section>
 
   <section id="paired" hidden>
-    <p class="muted">On the glasses: swipe to change view · tap to refresh · double-tap for the fleet.</p>
+    <p class="muted">On the glasses: swipe to change view · tap to refresh · double-tap for the fleet · press and hold to ask, let go to send.</p>
+    <form id="ask-form">
+      <label for="ask-text">Or type a question (read-only: ask, brief, recall, plan)</label>
+      <input id="ask-text" placeholder="what did I miss?" autocomplete="off">
+      <button type="submit">Ask</button>
+    </form>
     <button id="unpair" class="quiet" type="button">Unpair</button>
   </section>
 

@@ -915,7 +915,8 @@ NORM="$(phrase_normalize "$PHRASE")"
 # Fleet routing: "at home …" / "on the laptop …" runs the rest on that host. Only fires
 # when the alias is registered in ~/.shipmate/hosts — idioms fall through untouched.
 ROUTE="$(phrase_route "$NORM")"
-if [ -n "$ROUTE" ] && [ "$ROUTE" != "${ROUTE#* }" ]; then
+# (not from a read-only channel: the other host's bridge wouldn't know the phrase was read-only)
+if [ -n "$ROUTE" ] && [ "$ROUTE" != "${ROUTE#* }" ] && [ "${SHIPMATE_READONLY:-}" != 1 ]; then
   if route_to_host "${ROUTE%% *}" "${ROUTE#* }"; then exit 0; fi
 fi
 
@@ -924,6 +925,21 @@ CLEAN="$(phrase_strip_confirm "$NORM")"
 # A bare "confirm" / "do it" utterance means: execute what the session just planned.
 if [ -z "$CLEAN" ] && [ "$MODE" = "execute" ]; then CLEAN="go ahead with what we just discussed"; fi
 VERB="$(phrase_verb "$CLEAN")"
+
+# A read-only channel (the glasses: SHIPMATE_READONLY=1, set by the server for shipmate:read
+# tokens) can ask, brief, recall and plan. Anything more is refused in code and recorded.
+if [ "${SHIPMATE_READONLY:-}" = 1 ]; then
+  WHY="$(phrase_readonly_refusal "$VERB" "$MODE")"
+  if [ -n "$WHY" ]; then
+    P="$(resolve_project "$CLEAN")"; ledger_record scope refused "${P:+$(basename "$P")}" "$PHRASE" "read-only channel: $WHY" >/dev/null
+    case "$WHY" in
+      ship)    speak "I heard ship it, but the glasses can only plan. Tap Ship it on your phone, or say it to Siri." ;;
+      memory)  speak "The glasses can't change what I remember. Say it to Siri or the Claude app." ;;
+      *)       speak "The glasses are read-only, so I can't do that from here. Say it to Siri or the Claude app." ;;
+    esac
+    exit 0
+  fi
+fi
 
 case "$VERB" in
   new)    rm -f "$STATE_DIR/session.id" "$STATE_DIR/session.project"; speak "Fresh session." ;;

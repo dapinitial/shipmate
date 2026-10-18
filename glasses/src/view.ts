@@ -99,4 +99,36 @@ export function render(g: Glance | null, view: View, now = new Date(), error = '
   return lines.slice(0, MAX_LINES).map((l) => clip(l)).join('\n');
 }
 
+// Word-wrap to the display's line width; a word longer than a line is cut.
+export function wrap(text: string, width = LINE_CHARS): string[] {
+  const out: string[] = [];
+  for (const para of text.replace(/\r/g, '').split('\n')) {
+    let line = '';
+    for (const w of para.split(/\s+/).filter(Boolean)) {
+      const word = w.length > width ? w.slice(0, width - 1) + '…' : w;
+      if (!line) line = word;
+      else if (line.length + 1 + word.length <= width) line += ' ' + word;
+      else { out.push(line); line = word; }
+    }
+    if (line) out.push(line);
+  }
+  return out;
+}
+
+// Talking: what the glasses show while listening, thinking, and answering. An answer longer than
+// one screen is paged (swipe); the header says which page.
+export type Talk = { state: 'listening'; seconds: number } | { state: 'thinking'; heard?: string }
+  | { state: 'answer'; heard: string; answer: string; page: number } | { state: 'error'; message: string };
+export const ANSWER_LINES = MAX_LINES - 2; // header + what it heard
+export function answerPages(answer: string): number { return Math.max(1, Math.ceil(wrap(answer).length / ANSWER_LINES)); }
+export function renderTalk(t: Talk): string {
+  const head = (s: string) => `SHIPMATE · ${s}`;
+  if (t.state === 'listening') return [head('LISTENING'), '', `● ${t.seconds}s`, '', 'speak, then let go'].join('\n');
+  if (t.state === 'thinking') return [head('THINKING'), ...(t.heard ? ['', clip(`"${t.heard}"`)] : [])].join('\n');
+  if (t.state === 'error') return [head('DIDN\'T GET THAT'), '', ...wrap(t.message).slice(0, MAX_LINES - 4), '', 'hold to try again'].join('\n');
+  const pages = answerPages(t.answer), page = Math.min(Math.max(0, t.page), pages - 1);
+  const body = wrap(t.answer).slice(page * ANSWER_LINES, (page + 1) * ANSWER_LINES);
+  return [head(pages > 1 ? `ANSWER ${page + 1}/${pages}` : 'ANSWER'), clip(`> ${t.heard}`), ...body].join('\n');
+}
+
 export const nextView = (v: View, step: 1 | -1): View => VIEWS[(VIEWS.indexOf(v) + step + VIEWS.length) % VIEWS.length];

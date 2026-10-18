@@ -62,6 +62,16 @@ ok "catch me up"         "$(phrase_verb 'catch me up')"                         
 ok "what happened overnight beats result" "$(phrase_verb 'what happened overnight')" brief
 ok "what happened with job 2 is still result" "$(phrase_verb 'what happened with job 2')" result
 ok "a briefing for the team is not the briefing" "$(phrase_verb 'write a briefing for the team')" say
+ok "read-only: ship"     "$(phrase_readonly_refusal say execute)"                     ship
+ok "read-only: a plan"   "$(phrase_readonly_refusal say plan)"                        ""
+ok "read-only: brief"    "$(phrase_readonly_refusal brief plan)"                      ""
+ok "read-only: rollback described" "$(phrase_readonly_refusal rollback plan)"         ""
+ok "read-only: rollback confirmed" "$(phrase_readonly_refusal rollback execute)"      ship
+ok "read-only: remember" "$(phrase_readonly_refusal remember plan)"                   memory
+ok "read-only: done"     "$(phrase_readonly_refusal done plan)"                       memory
+ok "read-only: log"      "$(phrase_readonly_refusal log plan)"                        log
+ok "read-only: job"      "$(phrase_readonly_refusal job plan)"                        job
+ok "read-only: counsel toggle" "$(phrase_readonly_refusal counsel_on plan)"           setting
 ok "doctor"              "$(phrase_verb 'doctor')"                                    doctor
 ok "preflight"           "$(phrase_verb 'preflight')"                                 doctor
 ok "health check"        "$(phrase_verb 'health check')"                              doctor
