@@ -123,6 +123,20 @@ joining your tailnet *is* the login. Tabs for each device type:
 All values are derived at startup (user, tailnet name, repo URL, ntfy topic) — nothing
 hardcoded.
 
+## Glasses: the glance, questions, pairing
+
+The same server feeds the Even G2 app ([glasses/](../glasses/)) with three endpoints, all
+read-only by construction:
+
+| Endpoint | Auth | Does |
+|---|---|---|
+| `POST /device/pair` | an 8-character code from `/pair` or `--pair-device` (one use, 10 min, 5 wrong guesses per 10 min) | trades the code for a `shipmate:read` token |
+| `GET /glance` | bearer, `shipmate:read` | fleet phases + the sentinel's alerts, the briefing as lines, the armed plan, the last five ledger decisions |
+| `POST /glance/ask` | bearer, `shipmate:read`; 30 per 10 min; 3 MB | a typed `{text}` or raw 16-bit PCM (`?ms=`), transcribed here by whisper.cpp and deleted, run through the bridge with `SHIPMATE_READONLY=1` (ask, brief, recall, plan — "ship it" and memory writes are refused and recorded) |
+
+CORS is open on those and `/token` only. `--grants` lists paired devices; `--revoke-client <id>`
+signs one out.
+
 ## Mission control (`/dashboard`)
 
 The onboarding server also serves **`http://<host>:8790/dashboard`** (tailnet-only, like
