@@ -28,6 +28,11 @@ waived() { ledger_record pre-push:override overridden "$2" "git push $remote" "S
 if [ -f "$LIB/project.sh" ]; then . "$LIB/project.sh"; else
   echo "shipmate pre-push: library missing at $LIB — reinstall with install-hooks.sh (allowing push)"; exit 0; fi
 root="$(git rev-parse --show-toplevel)"; proj="$(basename "$root")"
+# A linked worktree (git worktree add …/hotfix) is still the same project: name it after the
+# repository it belongs to, not the folder it happens to be checked out in.
+common="$(git rev-parse --git-common-dir 2>/dev/null)"
+case "$common" in /*) ;; *) common="$root/$common" ;; esac
+case "$common" in */.git) proj="$(basename "$(dirname "$common")")" ;; esac
 want="$(project_deploy_remote "$root")"
 if [ "$remote" != "$want" ] && [ "$url" != "$(git remote get-url "$want" 2>/dev/null)" ]; then
   if allowed remote; then waived remote "$proj"; else

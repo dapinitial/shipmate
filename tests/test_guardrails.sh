@@ -118,6 +118,13 @@ mkdir -p "$R/dist/private"; echo s > "$R/dist/private/key.txt"; G "$R" add -A; G
 out="$(G "$R" push origin main 2>&1)"; ok "generated never means unguarded" "$?" 1
 has "…protected still applies"  "$out" "'dist/private/key.txt' is a protected path"
 G "$R" reset -q --hard origin/main
+echo "  a worktree is recorded under its repository's name:"
+WT="$TMP/hotfix"; G "$R" worktree add -q --detach "$WT" main 2>/dev/null
+echo w > "$WT/w.txt"; G "$WT" add -A; G "$WT" commit -q -m wt
+: > "$SHIPMATE_LEDGER"; SHIPMATE_ALLOW=remote G "$WT" push -q mirror HEAD:refs/heads/wt >/dev/null 2>&1
+has "the override names the repo, not the folder" "$(cat "$SHIPMATE_LEDGER")" '"project":"r1"'
+ok "…and not the worktree folder" "$(grep -c '"project":"hotfix"' "$SHIPMATE_LEDGER")" 0
+G "$R" worktree remove --force "$WT" 2>/dev/null
 echo "  project-defined remote:"
 printf 'deploy_remote: mirror\n' > "$R/.shipmate.yml"; G "$R" add -A; G "$R" commit -q -m cfg
 out="$(G "$R" push origin main 2>&1)"; ok "origin refused when mirror is the deploy remote" "$?" 1
