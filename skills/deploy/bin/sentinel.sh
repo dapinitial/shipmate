@@ -108,7 +108,10 @@ for d in "$ROOT"/*/ "$ROOT"/*/*/; do
   # security: the site-hardening skill's live check (headers, cross-site guard, dependencies,
   # mail records, embeds). Flags come from .shipmate.yml: security_form, security_resolve,
   # security_mail, security_embed. --limits is never run here: it spends the form's real caps.
-  if [ -n "$url" ] && [ -z "$host_silent" ] && [ "$CHECKS" != "${CHECKS#* security }" ] && [ -f "$SECURITY_CHECK" ]; then
+  # It never looks while a deploy is in flight: the old build answers without the new headers for
+  # a minute and that is not drift. Three consistent sightings (15 minutes) before it speaks.
+  case "${phase:-ACTIVE}" in ACTIVE|READY|SUPERSEDED|'') security_ok=1 ;; *) security_ok="" ;; esac
+  if [ -n "$url" ] && [ -z "$host_silent" ] && [ -n "$security_ok" ] && [ "$CHECKS" != "${CHECKS#* security }" ] && [ -f "$SECURITY_CHECK" ]; then
     set -- "$url" --json
     v="$(project_setting "$d" security_form "")";    [ -n "$v" ] && set -- "$@" --form "$v"
     v="$(project_setting "$d" security_resolve "")"; [ -n "$v" ] && set -- "$@" --resolve "$v"
@@ -120,7 +123,7 @@ try: d=json.load(sys.stdin)
 except Exception: sys.exit(0)
 print("; ".join(r["check"]+" ("+str(r["detail"])[:60]+")" for r in d["results"] if not r["ok"] and not r["skipped"]))' 2>/dev/null)"
     if [ -n "$failing" ]; then verdict=bad; else verdict=ok; fi
-    case "$(sentinel_step "$name.security" "$verdict" "security drift" "$failing" 2)" in
+    case "$(sentinel_step "$name.security" "$verdict" "security drift" "$failing" 3)" in
       open)   say "🛡️ $name drifted: $failing. Run the site-hardening audit on it." ;;
       clear*) say "🛡️ $name is back to baseline: the security check passes again." ;;
     esac
