@@ -19,8 +19,9 @@ case "${1:-}" in -h|--help) sed -n '2,17p' "$0"; exit 0;; esac
 BIN="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"; LIB="$BIN/../lib"
 . "$LIB/sentinel.sh"; . "$LIB/project.sh"; . "$LIB/provider.sh"
 APPSH="${SHIPMATE_APP_SH:-$BIN/app.sh}"
-CHECKS=" ${SHIPMATE_SENTINEL_CHECKS:-site deploy cert} "
+CHECKS=" ${SHIPMATE_SENTINEL_CHECKS:-site deploy cert security} "
 CERT_DAYS="${SHIPMATE_CERT_DAYS:-14}"
+SECURITY_CHECK="${SHIPMATE_SECURITY_CHECK:-$HOME/.claude/skills/site-hardening/assets/check.mjs}"
 
 if [ "${1:-}" = --report ]; then
   open="$(sentinel_open)"
@@ -101,6 +102,27 @@ for d in "$ROOT"/*/ "$ROOT"/*/*/; do
     case "$(sentinel_step "$name.deploy" "$verdict" "deploy failed" "$line" 1)" in
       open)   say "❌ $name: the latest deploy failed. Production stays on the previous version until a fix ships." ;;
       clear*) say "✅ $name deploys again: the latest deploy is live." ;;
+    esac
+  fi
+
+  # security: the site-hardening skill's live check (headers, cross-site guard, dependencies,
+  # mail records, embeds). Flags come from .shipmate.yml: security_form, security_resolve,
+  # security_mail, security_embed. --limits is never run here: it spends the form's real caps.
+  if [ -n "$url" ] && [ -z "$host_silent" ] && [ "$CHECKS" != "${CHECKS#* security }" ] && [ -f "$SECURITY_CHECK" ]; then
+    set -- "$url" --json
+    v="$(project_setting "$d" security_form "")";    [ -n "$v" ] && set -- "$@" --form "$v"
+    v="$(project_setting "$d" security_resolve "")"; [ -n "$v" ] && set -- "$@" --resolve "$v"
+    v="$(project_setting "$d" security_mail "")";    [ -n "$v" ] && set -- "$@" --mail "$v"
+    v="$(project_setting "$d" security_embed "")";   [ -n "$v" ] && set -- "$@" --embed "$v"
+    failing="$(node "$SECURITY_CHECK" "$@" 2>/dev/null | python3 -c '
+import json,sys
+try: d=json.load(sys.stdin)
+except Exception: sys.exit(0)
+print("; ".join(r["check"]+" ("+str(r["detail"])[:60]+")" for r in d["results"] if not r["ok"] and not r["skipped"]))' 2>/dev/null)"
+    if [ -n "$failing" ]; then verdict=bad; else verdict=ok; fi
+    case "$(sentinel_step "$name.security" "$verdict" "security drift" "$failing" 2)" in
+      open)   say "🛡️ $name drifted: $failing. Run the site-hardening audit on it." ;;
+      clear*) say "🛡️ $name is back to baseline: the security check passes again." ;;
     esac
   fi
 
