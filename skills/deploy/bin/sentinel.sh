@@ -105,15 +105,17 @@ for d in "$ROOT"/*/ "$ROOT"/*/*/; do
     esac
   fi
 
-  # security: the site-hardening skill's live check (headers, cross-site guard, dependencies,
-  # mail records, embeds). Flags come from .shipmate.yml: security_form, security_resolve,
-  # security_mail, security_embed. --limits is never run here: it spends the form's real caps.
+  # security: the site-hardening skill's live check (headers, dependencies, mail records, embeds).
+  # Flags come from .shipmate.yml: security_url (when the app isn't at the health URL),
+  # security_resolve, security_mail, security_embed. Forms are NEVER posted from here: every
+  # probe spends the form's real rate limit, writes a row in its attempt log and counts toward its
+  # alerts, and from this Mac it locked David out of his own contact form. security_form is for
+  # the hand-run check after a deploy.
   # It never looks while a deploy is in flight: the old build answers without the new headers for
   # a minute and that is not drift. Three consistent sightings (15 minutes) before it speaks.
   case "${phase:-ACTIVE}" in ACTIVE|READY|SUPERSEDED|'') security_ok=1 ;; *) security_ok="" ;; esac
   if [ -n "$url" ] && [ -z "$host_silent" ] && [ -n "$security_ok" ] && [ "$CHECKS" != "${CHECKS#* security }" ] && [ -f "$SECURITY_CHECK" ]; then
-    set -- "$url" --json
-    v="$(project_setting "$d" security_form "")";    [ -n "$v" ] && set -- "$@" --form "$v"
+    set -- "$(project_setting "$d" security_url "$url")" --json
     v="$(project_setting "$d" security_resolve "")"; [ -n "$v" ] && set -- "$@" --resolve "$v"
     v="$(project_setting "$d" security_mail "")";    [ -n "$v" ] && set -- "$@" --mail "$v"
     v="$(project_setting "$d" security_embed "")";   [ -n "$v" ] && set -- "$@" --embed "$v"
