@@ -164,7 +164,7 @@ Full thinking in **[docs/ROADMAP.md](docs/ROADMAP.md)**. Filming it: **[docs/DEM
 ## Status
 
 Early, and dogfooded on the author's own fleet since July (eight live sites: seven on
-DigitalOcean, one on Vercel). 687 shell checks and 16 glasses tests. The honest gaps: the host
+DigitalOcean, one on Vercel). 698 shell checks and 16 glasses tests. The honest gaps: the host
 is still a laptop; the glasses and ring are verified in the simulator, not on the hardware; the
 sentinel's security check is exercised on the live fleet but has no test in the suite yet; and
 Siri dictation remains the weakest link — which is why nothing executes on a single sentence.

@@ -7,7 +7,8 @@
 #              runs this every 5 minutes and pushes each line)
 #   --report   list open problems without probing anything
 #
-# Checks, for each git repo under sites-root (one or two levels) that has a deploy target:
+# Checks, for each git repo under sites-root (one or two levels) that has a deploy target, one
+# checkout per app (the one whose origin the host deploys from):
 #   site    the health_url in .shipmate.yml (else the provider's production URL) answers 2xx/3xx,
 #           and contains expect_text when the project sets one — confirmed on 2 checks in a row;
 #           the same request's time to first byte and full load are recorded (lib/timing.sh)
@@ -19,7 +20,7 @@
 # SHIPMATE_SENTINEL_CHECKS limits the set ("site deploy cert security"). Observes only: it never
 # deploys, rolls back or retries anything. A suggested fix is a phrase for the usual gate.
 set -uo pipefail
-case "${1:-}" in -h|--help) sed -n '2,20p' "$0"; exit 0;; esac
+case "${1:-}" in -h|--help) sed -n '2,21p' "$0"; exit 0;; esac
 BIN="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"; LIB="$BIN/../lib"
 . "$LIB/sentinel.sh"; . "$LIB/project.sh"; . "$LIB/provider.sh"; . "$LIB/timing.sh"
 APPSH="${SHIPMATE_APP_SH:-$BIN/app.sh}"
@@ -65,9 +66,21 @@ EOF
 
 say() { printf '%s\n' "$1"; }
 
-for d in "$ROOT"/*/ "$ROOT"/*/*/; do
-  d="${d%/}"; [ -d "$d/.git" ] || continue
-  [ "$(provider_of "$d")" != none ] || continue
+# One checkout per app. A second clone or a worktree of the same app is the same site, and
+# watching it twice would say every problem twice: keep the checkout the host deploys from
+# (its origin is the app's repo), else the first one found. Order is otherwise the folder order.
+targets() {
+  n=0
+  for d in "$ROOT"/*/ "$ROOT"/*/*/; do
+    d="${d%/}"; [ -d "$d/.git" ] || continue
+    [ "$(provider_of "$d")" != none ] || continue
+    n=$((n + 1)); if provider_deploys_here "$d"; then r=0; else r=1; fi
+    printf '%s|%s|%s|%s\n' "$(provider_app_id "$d")" "$r" "$n" "$d"
+  done | sort -t'|' -k1,1 -k2,2n -k3,3n | awk -F'|' '!seen[$1]++ { print $3 "|" $4 }' | sort -t'|' -k1,1n | cut -d'|' -f2-
+}
+
+while IFS= read -r d <&3; do
+  [ -n "$d" ] || continue
   name="$(basename "$d")"; host_silent=""
   status="$(bash "$APPSH" status "$d" 2>/dev/null)"
   url="$(project_health_url "$d")"
@@ -155,7 +168,9 @@ print("; ".join(r["check"]+" ("+str(r["detail"])[:60]+")" for r in d["results"] 
       clear*) say "🔒 $name: $host's certificate is valid again." ;;
     esac
   fi
-done
+done 3<<TARGETS
+$(targets)
+TARGETS
 # The heartbeat: a check's own file only changes when its verdict does, so "when did the sentinel
 # last look" lives here (the briefing reads it before calling a night quiet).
 [ -n "$TIMES" ] && printf '%s' "$TIMES" | timing_record

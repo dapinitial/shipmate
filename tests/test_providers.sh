@@ -74,6 +74,19 @@ ok "nothing"            "$(provider_of "$P")" none
 mkdir -p "$P/.vercel"; echo '{}' > "$P/.vercel/project.json"; ok "vercel link"  "$(provider_of "$P")" vercel
 mkdir -p "$P/.do"; echo 'name: x' > "$P/.do/app.yaml";        ok "do spec wins" "$(provider_of "$P")" do
 printf 'provider: vercel\n' > "$P/.shipmate.yml";              ok "explicit wins" "$(provider_of "$P")" vercel
+echo "which app a checkout is, and whether it deploys from here:"
+D1="$TMP/d1"; D2="$TMP/d2"; mkdir -p "$D1/.do" "$D2/.do"
+for r in "$D1" "$D2"; do git -C "$r" init -q; printf 'name: shop-app  # the app\nservices:\n  - github:\n      repo: acme/shop\n' > "$r/.do/app.yaml"; done
+git -C "$D1" remote add origin git@github.com:acme/shop.git
+ok "do: the spec's name"            "$(provider_app_id "$D1")" do:shop-app
+ok "a second clone is the same app" "$(provider_app_id "$D2")" do:shop-app
+ok "vercel: the project id"         "$(provider_app_id "$V")" vercel:prj_1
+ok "no target: its own path"        "$(provider_app_id "$TMP")" "dir:$TMP"
+ok "origin is the spec's repo"      "$(provider_deploys_here "$D1"; echo $?)" 0
+ok "no origin: not the deploying one" "$(provider_deploys_here "$D2"; echo $?)" 1
+git -C "$D2" remote add origin https://github.com/someone/fork.git
+ok "a fork's origin: not it either" "$(provider_deploys_here "$D2"; echo $?)" 1
+ok "vercel with an origin"          "$(provider_deploys_here "$V"; echo $?)" 0
 ok "app.sh provider"    "$(bash "$BIN/app.sh" provider "$V")" vercel
 has "app.sh none"       "$(bash "$BIN/app.sh" status "$TMP" 2>&1)" "has no deploy target"
 

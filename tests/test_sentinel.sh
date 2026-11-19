@@ -113,6 +113,25 @@ ok "a running sentinel blocks a second" "$(S; echo "exit $?")" "exit 0"
 ok "…and the second one probed nothing" "$(wc -l < "$TMP/app.calls")" "$before"
 rmdir "$TMP/state/.lock"
 
+echo "one checkout per app:"
+R2="$TMP/sites2"; rm -rf "$TMP/state"; : > "$TMP/app.calls"
+mk() { # <dir> <app name> [origin]
+  mkdir -p "$R2/$1/.do"; git -C "$R2/$1" init -q
+  printf 'name: %s\nservices:\n  - github:\n      repo: acme/%s\n' "$2" "$2" > "$R2/$1/.do/app.yaml"
+  [ -n "${3:-}" ] && git -C "$R2/$1" remote add origin "$3"
+  printf 'health_url: http://127.0.0.1:%s/\n' "$PORT" > "$R2/$1/.shipmate.yml"
+}
+mk a-new-clone shop                                   # sorts first, no origin
+mk zz-shop shop git@github.com:acme/shop.git          # sorts last, the one the host deploys from
+mk other other git@github.com:acme/other.git
+bash "$BIN/sentinel.sh" "$R2" >/dev/null 2>&1
+ok "the deploying checkout is watched, the clone isn't, a different app still is" \
+   "$(sort -u "$TMP/app.calls" | sed "s#$R2/##" | tr '\n' ' ')" "status other status zz-shop "
+ok "…and only they get state" "$(ls "$TMP/state" | sed 's/\..*//' | sort -u | tr '\n' ' ')" "other zz-shop "
+rm -rf "$R2/zz-shop"; : > "$TMP/app.calls"; bash "$BIN/sentinel.sh" "$R2" >/dev/null 2>&1
+ok "with no deploying checkout, the first one found is watched" \
+   "$(sort -u "$TMP/app.calls" | sed "s#$R2/##" | tr '\n' ' ')" "status a-new-clone status other "
+
 echo
 if [ "$fail" -eq 0 ]; then echo "✓ all $pass assertions passed"; exit 0
 else echo "✗ $fail failed, $pass passed"; exit 1; fi

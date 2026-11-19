@@ -76,13 +76,13 @@ The sentinel runs every 5 minutes from a launchd timer. Each problem is announce
 confirmed, and its recovery once, by push and in the briefing. It only reads; a fix it suggests is
 a phrase for the usual gate (*"roll back unakin, confirm"*).
 
-**What it watches today.** Every git repo under `~/Sites` with a deploy target; a git worktree of
-one of them is skipped, since it's the same app:
+**What it watches today.** Every git repo under `~/Sites` with a deploy target, one checkout per
+app: a worktree or a second clone of the same app is the same site, so only the checkout the host
+deploys from is watched:
 
 | Site | Repo | Host | URL checked (site, timing, cert) | Security check |
 |---|---|---|---|---|
 | davidpuerto.com | `davidpuerto.com-portfolio` | DigitalOcean | https://davidpuerto.com | headers; a third-party host the page needs; mail records for davidpuerto.com |
-| davidpuerto.com (again) | `davidpuerto.com` (a new clone, 2026-11-19) | DigitalOcean | https://davidpuerto.com | the same |
 | panogram | `panogram` | DigitalOcean | the production URL the host reports (no custom domain in its spec) | headers; `/embed/x` must stay embeddable |
 | Sedulous | `sedulous` | DigitalOcean | the production URL the host reports | headers |
 | shotgundetour.com | `shotgundetour` | DigitalOcean | https://shotgundetour.com | headers; a third-party host the page needs |
@@ -91,8 +91,10 @@ one of them is skipped, since it's the same app:
 | portal.unakin.com | `unakin-portal` | DigitalOcean | https://portal.unakin.com/api/health, must contain `ok` | run on portal.unakin.com: headers; a third-party host; mail records for unakin.com |
 | Rillet case study | `rillet/rillet-case-study` | Vercel | https://rillet-invoice-workspace.vercel.app | headers |
 
-That's eight distinct sites through nine repos. The second davidpuerto.com entry means its alerts
-would arrive twice until one checkout is retired or the sentinel learns to dedupe.
+That's eight sites. On 2026-11-19 a second clone of the portfolio appeared under `~/Sites`, and for
+about an hour the sentinel watched davidpuerto.com twice, so any alert would have arrived twice.
+It now keys each site by the app its spec names and keeps the checkout whose origin the host
+deploys from.
 
 **The four checks on each:**
 - **site**: answers 2xx/3xx (and contains `expect_text` where one is set), two checks in a row
@@ -166,7 +168,7 @@ not use `shield.mjs`.
 shipmate has no store release.
 - **Install:** `git clone` and `./install.sh` (links the skill into Claude Code); LaunchAgents keep
   the servers up.
-- **Before every commit:** 13 shell suites (687 checks) and 16 glasses tests.
+- **Before every commit:** 13 shell suites (698 checks) and 16 glasses tests.
 - **Glasses app:** `npm run pack` builds the `.ehpk`, sideloaded through Even Hub. Verified in the
   simulator; on the real G2 and R1 it's **PLANNED**.
 - **For the sites it ships:** push to `main` → the host builds → the live check confirms the
