@@ -1,7 +1,8 @@
 # shipmate on Even Realities G2
 
 Read-only shipmate status on G2 glasses: your fleet's production deploys, anything the sentinel
-has open (a site down, a failed deploy, a certificate about to lapse — listed first, with how long),
+has open (a site down, a failed deploy, a certificate about to lapse, security drift — listed first, with
+how long),
 any armed plan, and the gate's recent decisions, in plain words. Built on the Even Hub SDK (a web app that runs inside the
 Even app on your phone; the glasses render it and send gestures back).
 

@@ -14,6 +14,11 @@
 #     - site/case-studies/apple/
 #   generated:                     # build output a push may carry without counting toward
 #     - content-locked/            #   max_files (same globs); still checked against protected
+#   security_url: https://app.x    # the sentinel's security check: the app, when it isn't at health_url
+#   security_resolve: x.supabase.co  #   …third-party hosts the page depends on must answer (a,b)
+#   security_mail: example.com     #   …the domain whose mail records (SPF/DMARC) are checked
+#   security_embed: /embed/x       #   …a path partners frame: no same-origin frame rule
+#   security_form: /api/contact    #   …a form for the HAND-RUN check only; the sentinel never posts it
 #
 # Every reader takes the project dir, tolerates a missing file, and returns the default.
 # Sourced by preflight.sh, the pre-push hook and the bridge; tested in tests/test_guardrails.sh.

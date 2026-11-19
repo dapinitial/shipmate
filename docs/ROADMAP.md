@@ -56,6 +56,12 @@ changes production still goes through the same plan → grant → execute gate.
       Siri, the Claude app and the terminal; notes for the model, never permissions.
 - [x] **Talk on the glasses** — hold, speak, let go; whisper.cpp on the host; read-only.
       Verified in the Even Hub simulator; hardware pending.
+- [x] **Security drift** (2026-10-26) — a fourth sentinel check runs the site-hardening skill's
+      live check (headers, dependencies, mail records, embeds) with each project's flags from
+      `.shipmate.yml`. Three consistent sightings before it speaks; never while a deploy is in
+      flight (the old build answers without the new headers for a minute); **never posts a form**
+      (each probe spent the form's real rate limit and locked this Mac out of the portfolio's
+      contact form). No test in the suite yet — the next thing it needs.
 
 ## Next (queued, in order)
 1. **Always-on host: revive the iMac.** Move the servers, Funnel, the LaunchAgents and
@@ -69,8 +75,10 @@ changes production still goes through the same plan → grant → execute gate.
      over the cap since Oct 10 was over it because of `content-locked/` (~280 generated files a
      relock). Authored changes never passed 28 files a commit. `.shipmate.yml` now lists it under `generated:` (uncounted, still
      protected-checked); overrides record the counts they waived.
-   - [ ] Assess the 51 historical overrides with `ledger.sh annotate` (a human judgment), and
-     look at the one entry filed under "hotfix".
+   - [x] All 52 historical overrides assessed by hand with `ledger.sh annotate` (2026-10-20):
+     20 relocks, 5 that covered nothing, 11 retries of one push, 15 from a retry loop whose rule
+     can't be recovered, 1 deliberate. None let anything harmful through. The "hotfix" entry was
+     a push from a git worktree; the guard now names a worktree push after its repository.
 3. **One-tap rollback from the sentinel.** When the sentinel confirms a site down and the host
    has a previous good deployment, the push carries **Roll back** (tailnet-only button, like
    Ship it). Design:
@@ -86,7 +94,8 @@ changes production still goes through the same plan → grant → execute gate.
    ring's swipe pages and changes views, the audio rate (`[shipmate] heard N bytes in M ms`), and
    the layout on the real display.
 
-**Paused:** YC (installer for strangers, outside users). Revisit after 1–3.
+**Paused:** YC (installer for strangers, outside users). Revisit after 1, 3 and 4. No dates are
+promised for any of the above.
 
 ## Principles
 - **APIs, not UI automation.** Never script a dashboard's HTML — it's brittle and can't run in CI.

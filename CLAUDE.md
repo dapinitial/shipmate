@@ -50,12 +50,14 @@ inject env safely), **url** (the live URL), **allowlist/auth** (wire the app's s
   `preflight.sh` (deterministic checks before an execute turn), `install-hooks.sh` (the pre-push guard),
   `ledger.sh` (report/annotate the decision ledger; `report --dictation` lists the phrases that
   named no project, which is where dictation aliases come from), `sentinel.sh` (shipmate speaks
-  first: site down, failed deploy, expiring cert — announced once, recovery once; observes only),
+  first: site down, failed deploy, expiring cert, security drift — announced once, recovery once;
+  observes only, never posts a form),
   `briefing.sh` (what needs you + what happened since the last morning briefing; facts only, no model)
 - `skills/deploy/lib/provider.sh` — which host deploys a project (`provider:` in `.shipmate.yml`,
   else `.do/app.yaml`, else `.vercel/project.json`)
 - `skills/deploy/lib/project.sh` — per-project `.shipmate.yml` (deploy remote, branch, file cap,
-  protected paths, generated paths that don't count toward the cap, health URL) · `lib/pre-push.hook` — the guard installed per clone; an override
+  protected paths, generated paths that don't count toward the cap, health URL, the security
+  check's flags) · `lib/pre-push.hook` — the guard installed per clone; an override
   names the rule it is skipping (`SHIPMATE_ALLOW=remote|max-files|protected`), and one that
   covered nothing is not recorded, so the ledger counts bypasses rather than habits ·
   `lib/ledger.sh` — every gate decision appended to `~/.shipmate/ledger.jsonl` (facts only;

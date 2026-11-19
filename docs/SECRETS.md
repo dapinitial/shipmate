@@ -19,7 +19,7 @@ Push the secret *value* into the platform's encrypted env store.
 | Platform | Mechanism | shipmate adapter |
 |---|---|---|
 | **DigitalOcean** | app-spec env, `type: SECRET` | `bin/do-provision.sh` — temp-spec-and-shred ✅ |
-| **Vercel** | `vercel env add` reads value from **stdin** | pipe via stdin (no temp file needed) 🛠 |
+| **Vercel** | `vercel env add` reads value from **stdin** | `bin/vercel-provision.sh` — piped via stdin ✅ |
 | Render / Fly / Railway | CLI/API env set | same shape |
 
 Good enough for small apps. The value lives in the platform.
@@ -42,6 +42,6 @@ secrets in `.tf`.
 
 ## What this means for shipmate
 There is **no one-size injection** — each target needs its own adapter, and doing each one the
-*right, safe way* is the hard, valuable part (not a thin wrapper). Roadmap: DO ✅ → Vercel stdin →
+*right, safe way* is the hard, valuable part (not a thin wrapper). Roadmap: DO ✅ → Vercel stdin ✅ →
 AWS/Azure vault-reference → Terraform encrypted-state. The endgame is Philosophy 2 everywhere:
 "store it in your cloud's vault and reference it" instead of copying values around.

@@ -12,10 +12,12 @@
 #           and contains expect_text when the project sets one — confirmed on 2 checks in a row
 #   deploy  the newest production deployment did not fail — a building one is no verdict
 #   cert    the site's TLS certificate is valid for more than SHIPMATE_CERT_DAYS (default 14)
-# SHIPMATE_SENTINEL_CHECKS limits the set ("site deploy cert"). Observes only: it never deploys,
-# rolls back or retries anything. A suggested fix is a phrase for the usual gate.
+#   security the site-hardening live check (security_* flags in .shipmate.yml), 3 sightings,
+#           never mid-deploy, never posting a form; skipped when the skill isn't installed
+# SHIPMATE_SENTINEL_CHECKS limits the set ("site deploy cert security"). Observes only: it never
+# deploys, rolls back or retries anything. A suggested fix is a phrase for the usual gate.
 set -uo pipefail
-case "${1:-}" in -h|--help) sed -n '2,17p' "$0"; exit 0;; esac
+case "${1:-}" in -h|--help) sed -n '2,18p' "$0"; exit 0;; esac
 BIN="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"; LIB="$BIN/../lib"
 . "$LIB/sentinel.sh"; . "$LIB/project.sh"; . "$LIB/provider.sh"
 APPSH="${SHIPMATE_APP_SH:-$BIN/app.sh}"

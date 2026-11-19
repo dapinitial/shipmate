@@ -8,8 +8,16 @@ the host, the DNS, and the certificate. One command instead of an afternoon of d
 > dance — and it's **voice**: *"Hey Siri, shipmate — deploy panogram… ship it"* from CarPlay, a
 > continuous conversation in the Claude app (via [MCP](mcp/)), or a question asked into a pair of
 > Even G2 glasses ([glasses/](glasses/)) — while background agents build, test, and wait for your
-> go. And it speaks first: it watches every live site, briefs you at 7:30, and remembers across
-> channels. None of that adds a way to ship.
+> go. And it speaks first: it watches every live site (up, deploying, certificate, security
+> baseline), briefs you at 7:30, and remembers across channels. None of that adds a way to ship.
+
+## What it is, and what it isn't
+
+shipmate **ships and runs** websites you already have: it deploys them, maps their domains,
+guards every push, watches them in production, and rolls them back. It is not a site builder.
+The building happens where it always did — in Claude Code, or in a background agent shipmate
+starts on a throwaway branch with no deploy credentials — and comes back as a proposal that
+has to pass the same gate as anything you'd push yourself.
 
 ## Why
 
@@ -38,9 +46,9 @@ where you can hand agents your infrastructure and sleep.
 - **Workers are untrusted by design.** Background agents get a fresh branch, no deploy
   credentials, and can't touch the default branch. Their output is *proposals*; merge and
   deploy pass back through the gate.
-- **Thin clients, one engine.** Siri/SSH, the Claude app's voice mode (via [MCP](mcp/)), and
-  the terminal are interchangeable mouths on the same tested core — adding a front-end adds
-  **zero new authority**.
+- **Thin clients, one engine.** Siri/SSH, the Claude app's voice mode (via [MCP](mcp/)), the
+  glasses and the terminal are interchangeable mouths on the same tested core — adding a
+  front-end adds **zero new authority**.
 - **Tests where bugs are catastrophic.** The env secret-classifier and the parser that
   decides plan-vs-execute are the two places a bug ships a plaintext secret or executes a
   misheard command; both have suites, and so do the gate, the guard, the sign-in, the ledger,
@@ -49,6 +57,9 @@ where you can hand agents your infrastructure and sleep.
   an append-only ledger. Facts only; whether a refusal mattered is a human note, never inferred.
 - **The cheapest gesture gets the least authority.** The glasses and the R1 ring can watch and
   ask, never ship; approvals stay on the phone, where the plan is on the screen.
+- **Watching must not cost the thing watched.** The sentinel only reads. Its security check
+  never posts to a form (each probe would spend the form's real rate limit — it once locked this
+  Mac out of a contact form) and never judges a site mid-deploy.
 - **Deliberation is a toggle, not a lifestyle.** `counsel off` (default): the single default
   Anthropic model answers — fast, and frankly the best. `counsel on`: questions fan out to a
   multi-model panel in parallel and a chair synthesizes, *required to name the dissent*.
@@ -62,7 +73,8 @@ where you can hand agents your infrastructure and sleep.
   deploy-on-push), behind one set of lifecycle verbs — status, url, phase, check, rollback,
   roll-forward — so the gate, the checks and the ledger behave the same on both.
 - Generates the right `.do/app.yaml` for your stack (Next.js, Astro SSR, …) with **no secrets in
-  the repo**.
+  the repo**; secrets go to the host's encrypted store through a shredded temp file (DO) or stdin
+  (Vercel), never argv.
 - Prints the exact DNS record to map your subdomain — or, when your DNS is hosted on the provider,
   maps it **automatically** (record + TLS cert, zero clicks).
 - Has a **safety model**: it shows the plan *and the cost* and waits for your explicit yes before
@@ -80,11 +92,18 @@ where you can hand agents your infrastructure and sleep.
   An override must name the rule it skips, and lands in the ledger.
 - **Signs you in properly**: the Claude-app connector uses OAuth 2.1 (PKCE, two scopes, rotating
   refresh tokens) with a passkey or an authenticator app.
-- **Speaks first**: a sentinel checks every live site every five minutes (down, failed deploy,
-  expiring cert) and pushes once when a problem starts and once when it ends; a deterministic
-  briefing arrives at 7:30 (*"good morning"* asks for it any time); *"remember…"*, *"remind me
-  to…"* and *"where did we leave off?"* work across Siri, the Claude app and the terminal —
-  memory is notes for the model, never permissions.
+- **Speaks first**: a sentinel checks every live site every five minutes and pushes once when a
+  problem starts and once when it ends —
+  - **site**: down, or up without its expected text (two checks in a row),
+  - **deploy**: the newest production deploy failed (a build in progress is no verdict),
+  - **cert**: invalid or expiring within 14 days,
+  - **security**: drift from the [site-hardening](https://github.com/dapinitial/site-hardening) baseline —
+    headers, dependencies, mail records, embeds — after three consistent sightings, never while
+    a deploy is in flight, never by posting a form.
+
+  A deterministic briefing arrives at 7:30 (*"good morning"* asks for it any time);
+  *"remember…"*, *"remind me to…"* and *"where did we leave off?"* work across Siri, the Claude
+  app and the terminal — memory is notes for the model, never permissions.
 - **Fits on your face**: a read-only glance on Even G2 glasses (fleet, briefing, plan, gate), and
   press-and-hold — on a temple or the R1 ring — to ask; speech is transcribed on your own machine
   with whisper.cpp and never kept.
@@ -101,7 +120,8 @@ Then in Claude Code, from any project: **`/deploy`**.
 Requires [`doctl`](https://docs.digitalocean.com/reference/doctl/) (DigitalOcean) and/or the
 [`vercel`](https://vercel.com/docs/cli) CLI, [`gh`](https://cli.github.com/), and a Claude Code
 session. Optional: Tailscale (voice + the Claude app), ntfy (pushes), whisper.cpp (talking on the
-glasses). `bash skills/deploy/bin/doctor.sh` reports what's set up.
+glasses), Node + the site-hardening skill (the sentinel's security check; skipped when absent).
+`bash skills/deploy/bin/doctor.sh` reports what's set up.
 
 ## Choose your destiny
 
@@ -115,32 +135,38 @@ glasses). `bash skills/deploy/bin/doctor.sh` reports what's set up.
 
 The per-provider details and the full DNS story live in **[docs/PROVIDERS.md](docs/PROVIDERS.md)**.
 
-## Roadmap
+## Where it's headed
 
-- [x] Provider-agnostic `/deploy` — pick DO or Vercel inline ("choose your destiny").
-- [x] **Voice** v1 — conversational Apple Shortcut → headless-Claude bridge ("Hey Siri,
-      shipmate, deploy panogram" … "do it"): persistent sessions, background agent jobs,
-      push-back to CarPlay. Plan mode is code-enforced. See **[voice/](voice/)**.
-- [ ] **DNS automation** — host the domain on the provider and subdomains become fully hands-off.
-- [ ] **Alexa Skill** front-end (same bridge).
-- [x] **MCP server** — the engine as agent-callable tools (plan/execute/status/jobs) with the
-      plan→confirm gate enforced in code; drivable from the Claude iOS app's **voice mode** as a
-      custom connector, with a tailnet-only **device onboarding page**. See **[mcp/](mcp/)**.
-- [x] **OAuth 2.1 sign-in**, the **decision ledger**, **Vercel at parity** behind the same gate.
-- [x] **It speaks first** — the sentinel, the 7:30 briefing, memory across channels, and
-      questions through Even G2 glasses + the R1 ring (simulator-verified; hardware next).
-- [ ] **Always-on host**, one-tap rollback from the sentinel — queued in the roadmap.
-- [ ] **MCP ecosystem** — providers ship their *own* agent-callable skills (Cloudflare, Stripe,
-      GitHub already do); shipmate becomes the orchestration + safety layer that composes them.
+Done: provider-agnostic `/deploy`; voice (Siri/CarPlay); the MCP server and Claude-app voice
+mode; OAuth 2.1 sign-in; the decision ledger (every historical override now judged by hand);
+Vercel at parity; and the "it speaks first" arc — sentinel, briefing, memory, glasses and ring.
 
-Full thinking in **[docs/ROADMAP.md](docs/ROADMAP.md)**.
+Next, in this order — no dates promised:
+
+1. **An always-on host.** Move the servers off the laptop to an iMac, with an outside
+   dead-man's switch (the sentinel can't report its own death) and a tested backup of
+   `~/.shipmate`.
+2. **One-tap rollback from the sentinel.** A confirmed "site down" push carries a **Roll back**
+   button (single-use, tailnet-only); on tap it re-probes first and does nothing if the site is
+   back. Designed, not built.
+3. **G2 + R1 on the real hardware.** Everything on the glasses is verified in the Even Hub
+   simulator today.
+
+Later: DNS automation when the domain is on provider DNS, an Alexa front-end on the same bridge,
+and composing providers' own MCP servers instead of CLI glue — shipmate as the orchestration and
+safety layer on top. Opening it to outside users (an installer for strangers) is **paused**
+until 1–3 are done.
+
+Full thinking in **[docs/ROADMAP.md](docs/ROADMAP.md)**. Filming it: **[docs/DEMO-SHOTS.md](docs/DEMO-SHOTS.md)**.
 
 ## Status
 
-Early, and dogfooded on the author's own fleet since July (eight live sites today). The honest gaps:
-the host is still a laptop, the glasses and ring are verified in the simulator rather than on the
-hardware, and Siri dictation remains the weakest link — which is why nothing executes on a single
-sentence. The full story, numbers included: [unakin.com/case-studies/shipmate](https://www.unakin.com/case-studies/shipmate).
+Early, and dogfooded on the author's own fleet since July (eight live sites: seven on
+DigitalOcean, one on Vercel). 659 shell checks and 16 glasses tests. The honest gaps: the host
+is still a laptop; the glasses and ring are verified in the simulator, not on the hardware; the
+sentinel's security check is exercised on the live fleet but has no test in the suite yet; and
+Siri dictation remains the weakest link — which is why nothing executes on a single sentence.
+The full story, numbers included: [unakin.com/case-studies/shipmate](https://www.unakin.com/case-studies/shipmate).
 
 ## License
 

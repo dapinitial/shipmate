@@ -122,9 +122,10 @@ tells you before you ask:
 | A site down (no answer, non-2xx/3xx, or missing `expect_text`) | 2 checks in a row | 🔴 *unakin is down: … If the last deploy caused it, say 'roll back unakin, confirm'.* |
 | The newest production deploy failed | at once (a build in progress is no verdict) | ❌ *…the latest deploy failed. Production stays on the previous version…* |
 | A TLS certificate expiring within 14 days, or invalid | 2 checks in a row | 🔒 *…renewal may be stuck.* |
+| Security drift from the site-hardening baseline (headers, dependencies, mail records, embeds) | 3 checks in a row, never mid-deploy | 🛡️ *…drifted: … Run the site-hardening audit on it.* |
 
 Each problem is announced once, and so is its recovery (🟢 *back, after about 12 min*). It
-only observes: it never deploys, rolls back or retries, and a fix it suggests is a phrase for
+only observes: it never deploys, rolls back or retries, never posts a form, and a fix it suggests is a phrase for
 the usual gate. *"Status"* leads with whatever is open, the glasses' Fleet view puts it on top,
 and `doctor` lists it. Transitions are kept in `~/.shipmate/sentinel.jsonl`, apart from the
 decision ledger: the ledger counts what the gates decided, this counts what the world did.
