@@ -12,8 +12,11 @@
 # than 7 days. Sources, each optional: the sentinel (open problems + ~/.shipmate/sentinel.jsonl),
 # the decision ledger, your open reminders (~/.shipmate/memory.jsonl), background jobs, pending spend approvals, the armed plan, the dead-zone
 # queue. If the sentinel hasn't run lately, the briefing says so instead of calling things quiet.
+# Slow pages: a site whose time to first byte or full load (the sentinel's measurements, typical
+# over the window) was over 3 s, or at least twice its own 7-day median (lib/timing.sh).
 set -uo pipefail
 case "${1:-}" in -h|--help) sed -n '2,16p' "$0"; exit 0;; esac
+TIMING_LIB="$(cd "$(dirname "${BASH_SOURCE[0]}")/../lib" && pwd)/timing.sh"
 command -v python3 >/dev/null 2>&1 || { echo "The briefing needs python3, which isn't installed."; exit 1; }
 LINES=""; MARK=""; HOURS=""
 while [ $# -gt 0 ]; do
@@ -22,8 +25,8 @@ done
 S="$HOME/.shipmate"
 MARKER="${SHIPMATE_BRIEFING_MARK:-$S/briefing.last}"
 
-python3 - "$MARKER" "$HOURS" "$LINES" <<'EOF'
-import json, os, sys, time, datetime as dt
+TIMING_LIB="$TIMING_LIB" python3 - "$MARKER" "$HOURS" "$LINES" <<'EOF'
+import json, os, subprocess, sys, time, datetime as dt
 marker, hours, as_lines = sys.argv[1], sys.argv[2], sys.argv[3] == '1'
 H = os.path.expanduser('~/.shipmate')
 env = lambda k, d: os.environ.get(k) or d
@@ -133,6 +136,25 @@ for (proj, check), lasts in sorted(outages.items()):
     dur = f' for {span(max(known))}' if known and check == 'site' else ''
     happened.append(f'{proj} {word}{dur}' + (f' ({times(len(lasts))})' if len(lasts) > 1 else '') + ', and recovered.')
     lines_then.append(f'{proj} {"down" if check == "site" else check}{" " + span(max(known)) if known and check == "site" else ""}, ok now')
+
+# Slow pages: the sentinel's timings, judged per site against its own week (lib/timing.sh).
+secs = lambda ms: f'{ms / 1000:.1f} s' if not as_lines else f'{ms / 1000:.1f}s'
+slow = {}
+try:
+    q = subprocess.run(['bash', '-c', '. "$0"; timing_slow "$1" "$2"', os.environ['TIMING_LIB'], str(since), str(now)],
+                       capture_output=True, text=True, timeout=30).stdout
+except Exception: q = ''
+for l in q.splitlines():
+    f = l.split('|')
+    if len(f) == 7: slow.setdefault(f[0], []).append((f[1], int(f[2]), int(f[3]), f[6]))
+for proj, ms in sorted(slow.items()):
+    parts, short = [], []
+    for m, rec, base, why in sorted(ms, key=lambda x: x[0] != 'load'):
+        label = 'full load' if m == 'load' else 'first byte'
+        parts.append(f'{label} typically {secs(rec)}, against {secs(base)} over the last week')
+        short.append(f'{"load" if m == "load" else "ttfb"} {secs(rec)} (wk {secs(base)})')
+    happened.append(f'{proj} was slow: ' + andjoin(parts) + '.')
+    lines_then.append(f'{proj} slow: ' + ', '.join(short))
 
 # A reconstructed entry's timestamp is when it was written down, not when it happened.
 dec = [r for r in jsonl(LEDGER) if r.get('type') == 'decision' and epoch(r.get('ts', '')) >= since

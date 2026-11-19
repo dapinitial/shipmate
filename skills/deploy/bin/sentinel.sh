@@ -9,7 +9,9 @@
 #
 # Checks, for each git repo under sites-root (one or two levels) that has a deploy target:
 #   site    the health_url in .shipmate.yml (else the provider's production URL) answers 2xx/3xx,
-#           and contains expect_text when the project sets one — confirmed on 2 checks in a row
+#           and contains expect_text when the project sets one — confirmed on 2 checks in a row;
+#           the same request's time to first byte and full load are recorded (lib/timing.sh)
+#           for the briefing to judge against the site's 7-day median
 #   deploy  the newest production deployment did not fail — a building one is no verdict
 #   cert    the site's TLS certificate is valid for more than SHIPMATE_CERT_DAYS (default 14)
 #   security the site-hardening live check (security_* flags in .shipmate.yml), 3 sightings,
@@ -17,9 +19,9 @@
 # SHIPMATE_SENTINEL_CHECKS limits the set ("site deploy cert security"). Observes only: it never
 # deploys, rolls back or retries anything. A suggested fix is a phrase for the usual gate.
 set -uo pipefail
-case "${1:-}" in -h|--help) sed -n '2,18p' "$0"; exit 0;; esac
+case "${1:-}" in -h|--help) sed -n '2,20p' "$0"; exit 0;; esac
 BIN="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"; LIB="$BIN/../lib"
-. "$LIB/sentinel.sh"; . "$LIB/project.sh"; . "$LIB/provider.sh"
+. "$LIB/sentinel.sh"; . "$LIB/project.sh"; . "$LIB/provider.sh"; . "$LIB/timing.sh"
 APPSH="${SHIPMATE_APP_SH:-$BIN/app.sh}"
 CHECKS=" ${SHIPMATE_SENTINEL_CHECKS:-site deploy cert security} "
 CERT_DAYS="${SHIPMATE_CERT_DAYS:-14}"
@@ -42,7 +44,8 @@ if ! mkdir "$LOCK" 2>/dev/null; then
   # a lock older than 15 minutes is a crashed run, not a live one
   [ -n "$(find "$LOCK" -maxdepth 0 -mmin +15 2>/dev/null)" ] && rmdir "$LOCK" 2>/dev/null && mkdir "$LOCK" 2>/dev/null || exit 0
 fi
-trap 'rmdir "$LOCK" 2>/dev/null' EXIT
+BODY="$SENTINEL_DIR/.body"; TIMES=""
+trap 'rmdir "$LOCK" 2>/dev/null; rm -f "$BODY"' EXIT
 
 cert_days() { # <host> → days until the certificate expires, or "invalid: <reason>"
   python3 - "$1" <<'EOF' 2>/dev/null || echo "invalid: no answer on 443"
@@ -72,11 +75,15 @@ for d in "$ROOT"/*/ "$ROOT"/*/*/; do
   case "$url" in ''|'<nil>') url="" ;; http*) ;; *) url="https://$url" ;; esac
 
   if [ -n "$url" ] && [ "$CHECKS" != "${CHECKS#* site }" ]; then
-    code="$(curl -s -m 15 -o /dev/null -w '%{http_code}' "$url" 2>/dev/null)"; [ -n "$code" ] || code=000
+    # one request: the status, its timings, and the body for expect_text
+    m="$(curl -s -m 15 -o "$BODY" -w '%{http_code} %{time_starttransfer} %{time_total}' "$url" 2>/dev/null)"
+    code="${m%% *}"; [ -n "$code" ] || code=000
     expect="$(project_expect_text "$d")"; verdict=ok; what=""
     case "$code" in
       2??|3??)
-        if [ "$code" = 200 ] && [ -n "$expect" ] && ! curl -s -m 15 "$url" 2>/dev/null | grep -q -F -- "$expect"; then
+        set -- $m; TIMES="$TIMES$name|$url|$1|$2|$3
+"
+        if [ "$code" = 200 ] && [ -n "$expect" ] && ! grep -q -F -- "$expect" "$BODY" 2>/dev/null; then
           verdict=bad; what="answers 200 but without \"$expect\""
         fi ;;
       000) verdict=bad; what="doesn't answer" ;;
@@ -151,5 +158,6 @@ print("; ".join(r["check"]+" ("+str(r["detail"])[:60]+")" for r in d["results"] 
 done
 # The heartbeat: a check's own file only changes when its verdict does, so "when did the sentinel
 # last look" lives here (the briefing reads it before calling a night quiet).
+[ -n "$TIMES" ] && printf '%s' "$TIMES" | timing_record
 : > "$SENTINEL_DIR/.last-run"
 exit 0

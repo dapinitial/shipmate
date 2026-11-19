@@ -131,6 +131,11 @@ and `doctor` lists it. Transitions are kept in `~/.shipmate/sentinel.jsonl`, apa
 decision ledger: the ledger counts what the gates decided, this counts what the world did.
 `SHIPMATE_SENTINEL=off` silences it; `sentinel.sh --report` shows what's open.
 
+Slow pages are never pushed. Each site check also records the time to first byte and the full
+load of the health URL; the 7:30 briefing names a site whose typical time since the last
+briefing was over 3 s (`SHIPMATE_SLOW_MS`) or at least twice its own 7-day median
+(`SHIPMATE_SLOW_FACTOR`, above `SHIPMATE_SLOW_FLOOR_MS`, 300 ms).
+
 ## Getting pinged while driving (ntfy)
 
 Job-done notifications go through [ntfy.sh](https://ntfy.sh) (free, no account):

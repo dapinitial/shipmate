@@ -62,6 +62,11 @@ changes production still goes through the same plan → grant → execute gate.
       flight (the old build answers without the new headers for a minute); **never posts a form**
       (each probe spent the form's real rate limit and locked this Mac out of the portfolio's
       contact form). No test in the suite yet — the next thing it needs.
+- [x] **Slow pages** (2026-11-19) — every site check records the health URL's time to first byte
+      and full load (the document, not a browser render; `lib/timing.sh`, 8 days kept). The 7:30
+      briefing names a site whose typical check in the window was over 3 s, or at least twice its
+      own 7-day median (with a week of history, and above 300 ms so 40 → 90 ms isn't news). One
+      slow check is a blip; nothing is pushed between briefings.
 
 ## Next (queued, in order)
 1. **Always-on host: revive the iMac.** Move the servers, Funnel, the LaunchAgents and

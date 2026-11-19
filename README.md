@@ -94,14 +94,16 @@ where you can hand agents your infrastructure and sleep.
   refresh tokens) with a passkey or an authenticator app.
 - **Speaks first**: a sentinel checks every live site every five minutes and pushes once when a
   problem starts and once when it ends —
-  - **site**: down, or up without its expected text (two checks in a row),
+  - **site**: down, or up without its expected text (two checks in a row); the same request's
+    time to first byte and full load are kept, so the briefing can say when a page got slow,
   - **deploy**: the newest production deploy failed (a build in progress is no verdict),
   - **cert**: invalid or expiring within 14 days,
   - **security**: drift from the [site-hardening](https://github.com/dapinitial/site-hardening) baseline —
     headers, dependencies, mail records, embeds — after three consistent sightings, never while
     a deploy is in flight, never by posting a form.
 
-  A deterministic briefing arrives at 7:30 (*"good morning"* asks for it any time);
+  A deterministic briefing arrives at 7:30 (*"good morning"* asks for it any time), and names any
+  site whose pages were typically over 3 s or twice their own 7-day median;
   *"remember…"*, *"remind me to…"* and *"where did we leave off?"* work across Siri, the Claude
   app and the terminal — memory is notes for the model, never permissions.
 - **Fits on your face**: a read-only glance on Even G2 glasses (fleet, briefing, plan, gate), and
@@ -162,7 +164,7 @@ Full thinking in **[docs/ROADMAP.md](docs/ROADMAP.md)**. Filming it: **[docs/DEM
 ## Status
 
 Early, and dogfooded on the author's own fleet since July (eight live sites: seven on
-DigitalOcean, one on Vercel). 659 shell checks and 16 glasses tests. The honest gaps: the host
+DigitalOcean, one on Vercel). 687 shell checks and 16 glasses tests. The honest gaps: the host
 is still a laptop; the glasses and ring are verified in the simulator, not on the hardware; the
 sentinel's security check is exercised on the live fleet but has no test in the suite yet; and
 Siri dictation remains the weakest link — which is why nothing executes on a single sentence.
